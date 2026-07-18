@@ -15,8 +15,6 @@ The active pipeline is a single CenterNet-style model. It predicts a center and 
       -> Cobb-angle and measurement-only morphology features
       -> overlays and optional CSV/JSON tables
 
-The separate corner-refiner experiment is retired from the active pipeline. On 2,282 matched Mendeley/MICCAI test instances, it reduced mean corner NME from 0.07343 to 0.06588, a 10.29 percent relative improvement. This did not meet the 20 percent acceptance target and was not considered worth the extra model and inference complexity. Its code, checkpoint, tests, Colab notebook, results, and restoration instructions are preserved in backup/refiner_approach.
-
 Suspicious-morphology classification is not implemented yet. Current morphology output contains geometric measurements and neighbor-relative features, not a diagnosis.
 
 ## Installation
@@ -120,24 +118,6 @@ python -m src.evaluate_centernet `
 Evaluation writes metrics.json, metrics.csv, and per_image_metrics.csv with separate raw and spine-chain rows. The source filter is case-insensitive and is applied before --limit.
 
 For a fair model comparison, use the same dataset, split, source filter, peak threshold, top-k, input size, and chain settings. Center/corner errors are conditional on matched detections, so interpret them alongside precision, recall, and F1.
-
-## Training and Colab
-
-Validate dataset tensors and a model forward pass before training:
-
-~~~powershell
-python -m src.workflows.check_centernet_dataset `
-  --dataset-root dataset/processed/coco_nih `
-  --split train `
-  --image-size 1024 `
-  --backbone hrnet_w18 `
-  --batch-size 1 `
-  --num-workers 0 `
-  --limit 2 `
-  --model-forward
-~~~
-
-The active notebook is notebooks/colab/train_centernet_hrnet_w18_nih.ipynb. The adjacent SOS Colab folder is the Drive-ready package. It trains on fast Colab-local storage, prints live progress, resumes from last.pt, and atomically backs up essential artifacts to Google Drive.
 
 ## Repository map
 
