@@ -1,0 +1,17 @@
+Prediction/evaluation options from the archived implementation:
+
+--refiner-max-center-offset FLOAT       default 0.20
+--refiner-allow-boundary-peaks          default false
+--refiner-no-nearest-anchor             default false
+--refiner-consensus                     default false
+--refiner-consensus-threshold FLOAT     default 0.04
+
+Runtime configuration defaults:
+
+max_center_offset_fraction = 0.20
+reject_boundary_peaks = True
+require_nearest_anchor = True
+consensus_enabled = False
+consensus_scale_delta = 0.10
+consensus_shift_fraction = 0.05
+max_consensus_p95_fraction = 0.04

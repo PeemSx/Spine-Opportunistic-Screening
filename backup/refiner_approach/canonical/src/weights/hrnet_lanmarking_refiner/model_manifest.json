@@ -1,0 +1,14 @@
+{
+  "artifact": "inference_refiner.pt",
+  "architecture": "hrnet_w18",
+  "corner_order": ["TL", "TR", "BL", "BR"],
+  "input_size": 256,
+  "heatmap_size": 64,
+  "selected_epoch": 7,
+  "selection_metric": "validation_mean_nme",
+  "validation_mean_nme": 0.049975410035857294,
+  "validation_mean_original_pixel_error": 9.293196984777078,
+  "sha256": "e6c8c16ce18a4749e8db8cc8a7bcb99e780400d25a07be40a8aeee500e7e8ad8",
+  "contains_training_state": false,
+  "model_state_matches_best_nme_exactly": true
+}

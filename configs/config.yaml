@@ -1,0 +1,5 @@
+augmentation:
+  image_size: 1024
+  seed: 20260627
+  horizontal_flip: false
+  preview_count: 24

@@ -1,7 +1,57 @@
+# Operating-system and editor files
 .DS_Store
-.venv
-dataset
+Thumbs.db
+Desktop.ini
+.idea/
+.vscode/
+*.code-workspace
+.env
+.env.*
+!.env.example
 
-outputs
-src/temp/
+# Python environments and caches
+.venv/
+venv/
+env/
+__pycache__/
+*.py[cod]
+*$py.class
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+.coverage.*
+htmlcov/
 
+# Jupyter
+.ipynb_checkpoints/
+
+# Packaging and build products
+build/
+dist/
+*.egg-info/
+
+# Local datasets and generated outputs
+/dataset/
+/outputs/
+/src/temp/
+/centernet_runs/
+/refiner_runs/
+/refiner_overfit/
+/wandb/
+tests
+
+
+# Model binaries are local artifacts. Keep small model cards and JSON metadata trackable.
+*.pt
+*.pth
+*.ckpt
+*.onnx
+*.engine
+*.safetensors
+
+# Logs and temporary files
+*.log
+*.tmp
+*.temp
+~$*

@@ -1,0 +1,79 @@
+{
+  "metadata": {
+    "centernet_checkpoint": "src\\weights\\hrnet\\best_center_f1.pt",
+    "refiner_checkpoint": "src\\weights\\hrnet_lanmarking_refiner\\inference_refiner.pt",
+    "dataset_root": "dataset\\processed\\coco",
+    "split": "test",
+    "sources": [
+      "mendeley_pa",
+      "miccai_2019"
+    ],
+    "fixed_match_policy": {
+      "basis": "CenterNet center to GT center",
+      "max_center_distance_fraction_of_gt_diagonal": 0.25,
+      "same_pairs_used_for_baseline_and_two_stage": true
+    },
+    "refiner_policy": {
+      "roi_variant_count": 1,
+      "acceptance_qc_enabled": false,
+      "consensus_enabled": false,
+      "fallback_enabled": false
+    }
+  },
+  "aggregate": {
+    "matched_instances": 2282,
+    "baseline_mean_nme": 0.07343217906869431,
+    "two_stage_mean_nme": 0.06587931618876396,
+    "baseline_median_nme": 0.06179088167846203,
+    "two_stage_median_nme": 0.053911494091153145,
+    "baseline_p95_nme": 0.15673652216792106,
+    "two_stage_p95_nme": 0.14648809656500816,
+    "baseline_mean_corner_error_px": 14.58656688341724,
+    "two_stage_mean_corner_error_px": 12.815782530148375,
+    "relative_improvement_percent": 10.285494691455101,
+    "baseline_pck_0.02": 0.09114811568799298,
+    "two_stage_pck_0.02": 0.1214943032427695,
+    "baseline_pck_0.05": 0.40315512708150747,
+    "two_stage_pck_0.05": 0.4868536371603856,
+    "baseline_pck_0.10": 0.7868098159509203,
+    "two_stage_pck_0.10": 0.8357800175284837
+  },
+  "per_source": {
+    "mendeley_pa": {
+      "matched_instances": 1486,
+      "baseline_mean_nme": 0.07516035069504685,
+      "two_stage_mean_nme": 0.06652155116859769,
+      "baseline_median_nme": 0.06236032396554947,
+      "two_stage_median_nme": 0.052478838711977005,
+      "baseline_p95_nme": 0.16021347045898438,
+      "two_stage_p95_nme": 0.14969733729958534,
+      "baseline_mean_corner_error_px": 14.451836746416028,
+      "two_stage_mean_corner_error_px": 12.387862967725837,
+      "relative_improvement_percent": 11.493825463241846,
+      "baseline_pck_0.02": 0.08596904441453566,
+      "two_stage_pck_0.02": 0.11591520861372813,
+      "baseline_pck_0.05": 0.39316958277254377,
+      "two_stage_pck_0.05": 0.492092866756393,
+      "baseline_pck_0.10": 0.7817967698519516,
+      "two_stage_pck_0.10": 0.8396702557200538
+    },
+    "miccai_2019": {
+      "matched_instances": 796,
+      "baseline_mean_nme": 0.07020596922351861,
+      "two_stage_mean_nme": 0.06468036998269247,
+      "baseline_median_nme": 0.060220202431082726,
+      "two_stage_median_nme": 0.05585142411291599,
+      "baseline_p95_nme": 0.1438625268638134,
+      "two_stage_p95_nme": 0.140633262693882,
+      "baseline_mean_corner_error_px": 14.83808570701498,
+      "two_stage_mean_corner_error_px": 13.614637391655776,
+      "relative_improvement_percent": 7.870554743335267,
+      "baseline_pck_0.02": 0.10081658291457286,
+      "two_stage_pck_0.02": 0.13190954773869346,
+      "baseline_pck_0.05": 0.4217964824120603,
+      "two_stage_pck_0.05": 0.47707286432160806,
+      "baseline_pck_0.10": 0.7961683417085427,
+      "two_stage_pck_0.10": 0.8285175879396985
+    }
+  }
+}
