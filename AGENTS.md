@@ -107,12 +107,13 @@ Before a full run, validate dataset tensors and a model forward pass. When activ
 - src/analysis/vertebral_morphology.py: measurement-only morphology features.
 - src/predict_centernet.py: one-stage prediction, overlays, and tables.
 - backup/refiner_approach: frozen retired experiment; not active source.
+- backup/yolo_pose_experiment: frozen YOLO-pose conversion/preview experiment; not active source.
 
 ## Implementation rules
 
 - Preserve user changes in a dirty worktree and avoid unrelated rewrites.
 - Keep one-stage CenterNet prediction and evaluation behavior working.
-- Do not import from backup or silently revive refiner flags, dependencies, or checkpoints.
+- Do not import from backup or silently revive retired refiner or YOLO-pose paths.
 - Prefer reproducible scripts over manual dataset edits.
 - Keep paths configurable and checkpoint metadata JSON-compatible.
 - Do not add large datasets, checkpoints, generated outputs, or virtual environments to Git.
@@ -130,4 +131,3 @@ For model/data changes, also run:
     python -m src.workflows.check_centernet_dataset
 
 Full training belongs on Colab. Local validation should use deterministic data checks, small forward/prediction smoke passes, checkpoint loading, and focused evaluation.
-

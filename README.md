@@ -129,3 +129,4 @@ For a fair model comparison, use the same dataset, split, source filter, peak th
 - src/predict_centernet.py: end-to-end one-stage prediction and output generation.
 - src/evaluate_centernet.py: full/source-filtered CenterNet evaluation.
 - backup/refiner_approach: retired two-stage refiner experiment and restoration notes.
+- backup/yolo_pose_experiment: retired COCO-to-YOLO-pose utilities and prototype.
