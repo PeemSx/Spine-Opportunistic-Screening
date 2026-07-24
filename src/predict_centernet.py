@@ -22,10 +22,17 @@ if str(PROJECT_ROOT) not in sys.path:
 
 from src.evaluation.centernet_decode import decode_centernet_outputs
 from src.evaluation.cobb_angle import CobbResult, calculate_cobb_angles
+from src.evaluation.config import DEFAULT_PEAK_THRESHOLD
 from src.analysis.vertebral_morphology import (
     MORPHOLOGY_FIELDNAMES,
     extract_chain_morphology,
     morphology_json_payload,
+)
+from src.data.inference_geometry import (
+    TransformMeta,
+    map_points_to_original,
+    resize_pad_image,
+    valid_center_mask,
 )
 from src.models.centernet import SUPPORTED_BACKBONES, build_centernet_model
 from src.postprocessing.spine_chain import (
@@ -121,64 +128,24 @@ def resolve_images(source: Path, recursive: bool = True) -> list[Path]:
     return images
 
 
-def resize_pad_image(image_rgb: np.ndarray, input_size: int) -> tuple[np.ndarray, dict[str, Any]]:
-    original_h, original_w = image_rgb.shape[:2]
-    scale = float(input_size) / float(max(original_h, original_w))
-    resized_w = int(round(original_w * scale))
-    resized_h = int(round(original_h * scale))
-    resized = cv2.resize(image_rgb, (resized_w, resized_h), interpolation=cv2.INTER_LINEAR)
-
-    pad_left = (input_size - resized_w) // 2
-    pad_top = (input_size - resized_h) // 2
-    padded = np.zeros((input_size, input_size, 3), dtype=np.uint8)
-    padded[pad_top : pad_top + resized_h, pad_left : pad_left + resized_w] = resized
-
-    meta = {
-        "original_w": original_w,
-        "original_h": original_h,
-        "resized_w": resized_w,
-        "resized_h": resized_h,
-        "pad_left": pad_left,
-        "pad_top": pad_top,
-        "scale": scale,
-        "input_size": input_size,
-    }
-    return padded, meta
-
-
 def image_to_tensor(image_rgb: np.ndarray, device: torch.device) -> torch.Tensor:
     image = image_rgb.astype(np.float32) / 255.0 - 0.5
     image = np.transpose(image, (2, 0, 1))[None]
     return torch.from_numpy(np.ascontiguousarray(image)).to(device)
 
-
-def map_points_to_original(points: np.ndarray, meta: dict[str, Any]) -> np.ndarray:
-    mapped = points.copy().astype(np.float32)
-    mapped[..., 0] = (mapped[..., 0] - float(meta["pad_left"])) / float(meta["scale"])
-    mapped[..., 1] = (mapped[..., 1] - float(meta["pad_top"])) / float(meta["scale"])
-    return mapped
-
-
-def valid_center_mask(centers: np.ndarray, meta: dict[str, Any]) -> np.ndarray:
-    if len(centers) == 0:
-        return np.zeros((0,), dtype=bool)
-    return (
-        (centers[:, 0] >= 0)
-        & (centers[:, 0] < float(meta["original_w"]))
-        & (centers[:, 1] >= 0)
-        & (centers[:, 1] < float(meta["original_h"]))
-    )
-
-
-def heatmap_to_original(heatmap: np.ndarray, meta: dict[str, Any]) -> np.ndarray:
-    input_size = int(meta["input_size"])
+def heatmap_to_original(heatmap: np.ndarray, meta: TransformMeta) -> np.ndarray:
+    input_size = int(meta.input_size)
     heat = cv2.resize(heatmap, (input_size, input_size), interpolation=cv2.INTER_CUBIC)
-    top = int(meta["pad_top"])
-    left = int(meta["pad_left"])
-    resized_h = int(meta["resized_h"])
-    resized_w = int(meta["resized_w"])
+    top = int(meta.pad_top)
+    left = int(meta.pad_left)
+    resized_h = int(meta.resized_height)
+    resized_w = int(meta.resized_width)
     crop = heat[top : top + resized_h, left : left + resized_w]
-    return cv2.resize(crop, (int(meta["original_w"]), int(meta["original_h"])), interpolation=cv2.INTER_CUBIC)
+    return cv2.resize(
+        crop,
+        (int(meta.original_width), int(meta.original_height)),
+        interpolation=cv2.INTER_CUBIC,
+    )
 
 
 def sorted_valid_cobb_centers(corners: np.ndarray) -> np.ndarray:
@@ -491,7 +458,7 @@ def add_cobb_line_fields(row: dict[str, Any], result: CobbResult, prefix: str, l
 
 def cobb_output(
     image_path: Path,
-    meta: dict[str, Any],
+    meta: TransformMeta,
     model_name: str,
     prediction: dict[str, np.ndarray],
 ) -> tuple[dict[str, Any], dict[str, Any], CobbResult]:
@@ -499,8 +466,8 @@ def cobb_output(
     row: dict[str, Any] = {
         "model": model_name,
         "image": str(image_path),
-        "original_width": meta["original_w"],
-        "original_height": meta["original_h"],
+        "original_width": meta.original_width,
+        "original_height": meta.original_height,
         "prediction_count": len(prediction["centers"]),
         "cobb_valid": bool(result.valid),
         "vertebra_count": int(result.vertebra_count),
@@ -513,8 +480,8 @@ def cobb_output(
     payload = {
         "model": model_name,
         "image": str(image_path),
-        "original_width": meta["original_w"],
-        "original_height": meta["original_h"],
+        "original_width": meta.original_width,
+        "original_height": meta.original_height,
         "prediction_count": len(prediction["centers"]),
         "cobb": result.to_dict(),
     }
@@ -530,7 +497,7 @@ def predict_image(
     down_ratio: int,
     peak_thresh: float,
     topk: int,
-) -> tuple[np.ndarray, np.ndarray, dict[str, np.ndarray], dict[str, Any]]:
+) -> tuple[np.ndarray, np.ndarray, dict[str, np.ndarray], TransformMeta]:
     image_bgr = cv2.imread(str(image_path), cv2.IMREAD_COLOR)
     if image_bgr is None:
         raise FileNotFoundError(image_path)
@@ -563,7 +530,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--backbone", type=str, default=None, choices=SUPPORTED_BACKBONES)
     parser.add_argument("--input-size", type=int, default=None)
     parser.add_argument("--down-ratio", type=int, default=None)
-    parser.add_argument("--peak-thresh", type=float, default=None)
+    parser.add_argument("--peak-thresh", type=float, default=DEFAULT_PEAK_THRESHOLD)
     parser.add_argument("--topk", type=int, default=None)
     parser.add_argument(
         "--save-morphology",
@@ -638,7 +605,7 @@ def main() -> None:
     backbone = args.backbone or train_args.get("backbone", "hrnet_w18")
     input_size = int(args.input_size or train_args.get("input_size", 1024))
     down_ratio = int(args.down_ratio or train_args.get("down_ratio", 4))
-    peak_thresh = float(args.peak_thresh if args.peak_thresh is not None else train_args.get("peak_thresh", 0.05))
+    peak_thresh = float(args.peak_thresh)
     topk = int(args.topk or train_args.get("eval_topk", 100))
     show_heatmap = args.overlay_background == "heatmap" and not args.no_heatmap
 
@@ -689,8 +656,8 @@ def main() -> None:
             json_output.append(
                 {
                     "image": str(image_path),
-                    "original_width": meta["original_w"],
-                    "original_height": meta["original_h"],
+                    "original_width": meta.original_width,
+                    "original_height": meta.original_height,
                     "prediction_count": len(prediction["centers"]),
                     "cobb": raw_cobb.to_dict(),
                     "predictions": rows,
@@ -730,8 +697,8 @@ def main() -> None:
                 chain_json_output.append(
                     {
                         "image": str(image_path),
-                        "original_width": meta["original_w"],
-                        "original_height": meta["original_h"],
+                        "original_width": meta.original_width,
+                        "original_height": meta.original_height,
                         "prediction_count": chain_count,
                         "raw_prediction_count": len(prediction["centers"]),
                         "spine_chain": chain_debug,

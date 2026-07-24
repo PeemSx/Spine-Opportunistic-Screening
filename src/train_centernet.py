@@ -40,6 +40,7 @@ if str(PROJECT_ROOT) not in sys.path:
 from src.data.centernet_dataset import CenterNetCocoDataset
 from src.evaluation.center_metrics import CenterMetricAccumulator
 from src.evaluation.centernet_decode import decode_centernet_outputs
+from src.evaluation.config import DEFAULT_PEAK_THRESHOLD
 from src.models.centernet import SUPPORTED_BACKBONES, build_centernet_model
 from src.training.centernet_loss import CenterNetLoss
 
@@ -419,7 +420,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--hm-weight", type=float, default=1.0)
     parser.add_argument("--reg-weight", type=float, default=1.0)
     parser.add_argument("--wh-weight", type=float, default=0.1)
-    parser.add_argument("--peak-thresh", type=float, default=0.05)
+    parser.add_argument("--peak-thresh", type=float, default=DEFAULT_PEAK_THRESHOLD)
     parser.add_argument("--eval-topk", type=int, default=100)
     parser.add_argument("--seed", type=int, default=20260627)
     parser.add_argument("--device", type=str, default="auto", choices=["auto", "cpu", "cuda"])

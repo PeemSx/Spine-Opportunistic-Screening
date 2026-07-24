@@ -20,7 +20,12 @@ from src.data.augmentation import (
     seed_augmentation,
     transform_coco_sample,
 )
-from src.data.centernet_targets import build_centernet_targets
+from src.data.centernet_targets import build_centernet_targets, keypoints_to_points
+from src.data.inference_geometry import (
+    TransformMeta,
+    resize_pad_image,
+    transform_annotations_to_model,
+)
 
 
 def _load_config(config_path: Path | None, image_size: int | None) -> AugmentationConfig:
@@ -129,27 +134,86 @@ class CenterNetCocoDataset(Dataset):
         self,
         image: np.ndarray,
         annotations: list[dict[str, Any]],
-    ) -> tuple[np.ndarray, list[dict[str, Any]]]:
-        transform = self.train_transform if self.augment else self.eval_transform
+    ) -> tuple[np.ndarray, list[dict[str, Any]], TransformMeta]:
+        if not self.augment:
+            image, meta = resize_pad_image(image, input_size=self.config.image_size)
+            return image, transform_annotations_to_model(annotations, meta), meta
+
+        transform = self.train_transform
         try:
-            return transform_coco_sample(image=image, annotations=annotations, transform=transform)
+            transformed_image, transformed_annotations = transform_coco_sample(
+                image=image,
+                annotations=annotations,
+                transform=transform,
+            )
         except AugmentationError:
-            if not self.augment:
-                raise
-            return transform_coco_sample(image=image, annotations=annotations, transform=self.eval_transform)
+            transformed_image, transformed_annotations = transform_coco_sample(
+                image=image,
+                annotations=annotations,
+                transform=self.eval_transform,
+            )
+        _, meta = resize_pad_image(image, input_size=self.config.image_size)
+        return transformed_image, transformed_annotations, meta
+
+    def _original_targets(
+        self,
+        annotations: list[dict[str, Any]],
+        records: list[dict[str, Any]],
+    ) -> tuple[np.ndarray, np.ndarray]:
+        centers = np.zeros((self.max_objects, 2), dtype=np.float32)
+        corners = np.zeros((self.max_objects, 4, 2), dtype=np.float32)
+        annotations_by_id = {
+            int(annotation["id"]): annotation
+            for annotation in annotations
+            if annotation.get("id") is not None
+        }
+        for index, record in enumerate(records):
+            annotation_id = record.get("annotation_id")
+            annotation = (
+                annotations_by_id.get(int(annotation_id))
+                if annotation_id is not None
+                else None
+            )
+            if annotation is None:
+                continue
+            points, visible = keypoints_to_points(annotation)
+            if len(points) != 4 or not visible.all():
+                continue
+            corners[index] = points.astype(np.float32)
+            centers[index] = points.mean(axis=0).astype(np.float32)
+        return centers, corners
+
+    @staticmethod
+    def _patient_cluster_id(image_info: dict[str, Any]) -> str:
+        for field in ("patient_id", "nih_patient_id"):
+            explicit = image_info.get(field)
+            if explicit not in (None, ""):
+                return str(explicit)
+        source = str(image_info.get("source_dataset", "unknown")).casefold()
+        file_name = Path(str(image_info["file_name"])).stem
+        if "nih" in source and file_name.startswith("NIH_"):
+            parts = file_name.split("_")
+            if len(parts) >= 2:
+                return "_".join(parts[:2])
+        return f"image:{int(image_info['id'])}"
 
     def __getitem__(self, index: int) -> dict[str, Any]:
         sample = self.samples[index]
         image_info = copy.deepcopy(sample["image"])
         annotations = copy.deepcopy(sample["annotations"])
 
+        original_annotations = copy.deepcopy(annotations)
         image = self._load_image(image_info)
-        image, annotations = self._transform_sample(image, annotations)
+        image, annotations, transform_meta = self._transform_sample(image, annotations)
         targets = build_centernet_targets(
             image_shape=image.shape,
             annotations=annotations,
             down_ratio=self.down_ratio,
             max_objects=self.max_objects,
+        )
+        gt_centers_original, gt_corners_original = self._original_targets(
+            original_annotations,
+            targets["records"],
         )
 
         return {
@@ -161,10 +225,21 @@ class CenterNetCocoDataset(Dataset):
             "reg_mask": torch.from_numpy(targets["reg_mask"]),
             "gt_centers": torch.from_numpy(targets["gt_centers"]),
             "gt_corners": torch.from_numpy(targets["gt_corners"]),
+            "gt_centers_original": torch.from_numpy(gt_centers_original),
+            "gt_corners_original": torch.from_numpy(gt_corners_original),
             "gt_count": torch.as_tensor(targets["gt_count"], dtype=torch.long),
             "collisions": torch.as_tensor(targets["collisions"], dtype=torch.long),
             "truncated": torch.as_tensor(targets["truncated"], dtype=torch.long),
             "file_name": image_info["file_name"],
             "source_dataset": image_info.get("source_dataset", "unknown"),
             "image_id": int(image_info["id"]),
+            "patient_cluster_id": self._patient_cluster_id(image_info),
+            "original_width": int(transform_meta.original_width),
+            "original_height": int(transform_meta.original_height),
+            "resized_width": int(transform_meta.resized_width),
+            "resized_height": int(transform_meta.resized_height),
+            "pad_left": int(transform_meta.pad_left),
+            "pad_top": int(transform_meta.pad_top),
+            "scale": float(transform_meta.scale),
+            "input_size": int(transform_meta.input_size),
         }

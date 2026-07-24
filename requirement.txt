@@ -1,6 +1,7 @@
 albumentations
 opencv-python-headless
 numpy
+scipy
 Pillow
 matplotlib
 PyYAML

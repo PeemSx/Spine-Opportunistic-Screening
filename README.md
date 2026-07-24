@@ -86,38 +86,47 @@ Spine-chain selection and Cobb overlays are enabled by default. Checkpoint metad
 
 ## Evaluation
 
-Evaluate the full combined test split:
+Evaluate the full combined test split with the deployed compact artifact. Its
+frozen peak threshold is `0.10`; deployed mode rejects metric-affecting
+overrides:
 
 ~~~powershell
 python -m src.evaluate_centernet `
-  --checkpoint src/weights/hrnet_nih/best_center_f1.pt `
+  --evaluation-profile deployed `
   --dataset-root dataset/processed/coco_nih `
   --split test `
-  --output-dir outputs/evaluation/hrnet18_nih_full_test `
+  --output-dir outputs/evaluation_v2/deployed_full_test `
   --batch-size 2 `
-  --num-workers 0 `
-  --peak-thresh 0.05 `
-  --topk 50
+  --num-workers 0
 ~~~
 
-Evaluate only the NIH source:
+Run a source-specific research evaluation with the standard operating point:
 
 ~~~powershell
 python -m src.evaluate_centernet `
+  --evaluation-profile research `
   --checkpoint src/weights/hrnet_nih/best_center_f1.pt `
   --dataset-root dataset/processed/coco_nih `
   --split test `
   --source-dataset "NIH ChestX-ray14" `
-  --output-dir outputs/evaluation/hrnet18_nih_test `
+  --output-dir outputs/evaluation_v2/research_nih_test `
   --batch-size 2 `
   --num-workers 0 `
-  --peak-thresh 0.05 `
+  --peak-thresh 0.10 `
   --topk 50
 ~~~
 
-Evaluation writes metrics.json, metrics.csv, and per_image_metrics.csv with separate raw and spine-chain rows. The source filter is case-insensitive and is applied before --limit.
+Evaluation writes `metrics.json`, `metrics.csv`, `per_image_metrics.csv`, and
+`per_instance_metrics.csv` with separate raw and spine-chain results. Add
+`--strict-gates` for a nonzero exit when any technical acceptance gate fails.
+The source filter is case-insensitive and is applied before `--limit`.
 
-For a fair model comparison, use the same dataset, split, source filter, peak threshold, top-k, input size, and chain settings. Center/corner errors are conditional on matched detections, so interpret them alongside precision, recall, and F1.
+The primary detection gate is normalized center distance `0.20D`, where `D` is
+the matched GT vertebra's bounding-box diagonal. Landmark NME and PCK use the
+same scale. Usable-vertebra recall requires a center match, a finite,
+non-self-intersecting in-image quadrilateral, and NME no greater than `0.10`.
+For fair research comparisons, keep the dataset, split, source filter, peak
+threshold, top-k, input size, and chain settings fixed.
 
 ## Repository map
 

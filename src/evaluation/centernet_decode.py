@@ -4,6 +4,8 @@ import numpy as np
 import torch
 import torch.nn.functional as F
 
+from src.evaluation.config import DEFAULT_PEAK_THRESHOLD
+
 
 def nms_heatmap(heatmap: torch.Tensor, kernel: int = 3) -> torch.Tensor:
     pad = (kernel - 1) // 2
@@ -24,7 +26,7 @@ def _gather_feature_map(feature: torch.Tensor, indices: torch.Tensor) -> torch.T
 def decode_centernet_outputs(
     outputs: dict[str, torch.Tensor],
     down_ratio: int = 4,
-    peak_thresh: float = 0.05,
+    peak_thresh: float = DEFAULT_PEAK_THRESHOLD,
     topk: int = 100,
 ) -> list[dict[str, np.ndarray]]:
     heat = nms_heatmap(outputs["hm"])

@@ -40,6 +40,8 @@ dist/
 /refiner_overfit/
 /wandb/
 tests
+!/tests/
+!/tests/*.py
 
 
 # Model binaries are local artifacts. Keep small model cards and JSON metadata trackable.
