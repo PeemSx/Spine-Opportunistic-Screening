@@ -165,6 +165,7 @@ def coco_from_predictions(
     images_dir: Path,
     source_checkpoint: str,
     prediction_policy: str,
+    source_dataset: str = "NIH ChestX-ray14",
 ) -> tuple[dict[str, Any], dict[str, int]]:
     images_dir = images_dir.resolve()
     images: list[dict[str, Any]] = []
@@ -187,7 +188,7 @@ def coco_from_predictions(
                 "file_name": image_name,
                 "width": width,
                 "height": height,
-                "source_dataset": "NIH ChestX-ray14",
+                "source_dataset": source_dataset,
                 "source_file_name": image_name,
             }
         )
@@ -236,7 +237,7 @@ def coco_from_predictions(
 
     coco = {
         "info": {
-            "description": "NIH ChestX-ray14 vertebra corner pseudo-annotations",
+            "description": f"{source_dataset} vertebra corner pseudo-annotations",
             "annotation_type": "COCO Keypoints",
             "corner_order": list(KEYPOINT_NAMES),
             "prediction_policy": prediction_policy,
@@ -299,12 +300,14 @@ def export_coco(
     output_path: Path,
     source_checkpoint: str,
     prediction_policy: str,
+    source_dataset: str = "NIH ChestX-ray14",
 ) -> dict[str, int]:
     coco, stats = coco_from_predictions(
         load_prediction_payload(predictions_path),
         images_dir=images_dir,
         source_checkpoint=source_checkpoint,
         prediction_policy=prediction_policy,
+        source_dataset=source_dataset,
     )
     validate_coco(coco, images_dir.resolve())
     output_path.parent.mkdir(parents=True, exist_ok=True)
@@ -331,6 +334,7 @@ def parse_args() -> argparse.Namespace:
     export_parser.add_argument("--output", type=Path, required=True)
     export_parser.add_argument("--source-checkpoint", required=True)
     export_parser.add_argument("--prediction-policy", required=True)
+    export_parser.add_argument("--source-dataset", default="NIH ChestX-ray14")
     return parser.parse_args()
 
 
@@ -350,6 +354,7 @@ def main() -> None:
         output_path=args.output,
         source_checkpoint=args.source_checkpoint,
         prediction_policy=args.prediction_policy,
+        source_dataset=args.source_dataset,
     )
     print(f"images: {stats['images']}")
     print(f"annotations: {stats['annotations']}")
