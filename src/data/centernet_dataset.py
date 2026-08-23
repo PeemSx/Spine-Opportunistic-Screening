@@ -189,6 +189,9 @@ class CenterNetCocoDataset(Dataset):
             explicit = image_info.get(field)
             if explicit not in (None, ""):
                 return str(explicit)
+        lumos_case_id = image_info.get("lumos_case_id")
+        if lumos_case_id not in (None, ""):
+            return f"lumos:{lumos_case_id}"
         source = str(image_info.get("source_dataset", "unknown")).casefold()
         file_name = Path(str(image_info["file_name"])).stem
         if "nih" in source and file_name.startswith("NIH_"):

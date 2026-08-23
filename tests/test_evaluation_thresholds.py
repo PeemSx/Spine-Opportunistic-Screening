@@ -134,6 +134,48 @@ class EvaluationThresholdTests(unittest.TestCase):
             self.assertEqual(settings["peak_thresh"], 0.12)
             self.assertTrue(metadata["nonstandard_peak_threshold"])
 
+    def test_research_reuses_checkpoint_validation_chain_settings(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            checkpoint_path = Path(directory) / "phase1.pt"
+            checkpoint_path.touch()
+            payload = checkpoint_payload(0.10, deployed=False)
+            payload["args"].update(
+                {
+                    "val_chain_duplicate_iou": 0.22,
+                    "val_chain_duplicate_center_scale": 0.40,
+                    "val_chain_score_thresh": 0.25,
+                    "val_chain_score_weight": 2.5,
+                    "val_chain_min_len": 4,
+                }
+            )
+            with (
+                patch(
+                    "src.evaluate_centernet.load_checkpoint",
+                    return_value=payload,
+                ),
+                patch(
+                    "src.evaluate_centernet.build_centernet_model",
+                    return_value=torch.nn.Identity(),
+                ),
+            ):
+                _, settings, _, _ = build_model_and_settings(
+                    arguments(
+                        profile="research",
+                        checkpoint=checkpoint_path,
+                    ),
+                    torch.device("cpu"),
+                )
+            self.assertEqual(
+                settings["chain"],
+                {
+                    "duplicate_iou": 0.22,
+                    "duplicate_center_scale": 0.40,
+                    "score_thresh": 0.25,
+                    "score_weight": 2.5,
+                    "min_len": 4,
+                },
+            )
+
     def test_deployed_artifact_rejects_nonstandard_threshold(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             checkpoint_path = Path(directory) / "deployed.pt"

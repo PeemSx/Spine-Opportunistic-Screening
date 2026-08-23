@@ -57,9 +57,20 @@ dataset/processed/coco_nih extends it with NIH ChestX-ray14:
 - No NIH patient may appear in multiple splits.
 - Two zero-annotation NIH images are deliberately excluded.
 
+dataset/processed/coco_nih_lumos extends that checkpoint with the reviewed August 10, 2026 Roboflow export:
+
+- Existing `coco_nih` image assignments are preserved.
+- NIH totals are 257 train, 32 validation, and 32 test images.
+- Lumos AP totals are 128 train, 16 validation, and 16 test images.
+- Combined totals are 1,788 train, 223 validation, and 223 test images.
+- Additional NIH studies remain grouped with their patient; Lumos images are grouped by case.
+- The deterministic extension seed is 20260810.
+- Both incoming Roboflow label schemas are normalized to one `vertebra` category in TL, TR, BL, BR order.
+- Four incompletely annotated Lumos images and two tiny annotations are deliberately excluded; exact details are recorded in `split_summary.json`.
+
 One COCO image is one radiograph. Keep all vertebrae from a radiograph in the same split. Never create annotation-level leakage.
 
-Use split_summary.json as the provenance/count authority. Prefer reproducible builders such as src/data/build_coco_nih.py over manual processed-JSON edits.
+Use split_summary.json as the provenance/count authority. Prefer reproducible builders such as src/data/build_coco_nih.py and src/data/build_coco_nih_lumos.py over manual processed-JSON edits.
 
 ## Evaluation conventions
 
@@ -89,9 +100,9 @@ Visual debugging outputs are part of correctness. Preserve clear overlays for ce
 The main repository is canonical. The adjacent SOS Colab folder is a deployable private-Drive package, not the source of truth.
 
 - Active configuration: configs/config.yaml.
-- Active notebook: notebooks/colab/train_centernet_hrnet_w18_nih.ipynb.
+- Active notebook: notebooks/colab/train_centernet_hrnet_w18_nih_lumos.ipynb.
 
-CenterNet training prints live batch and epoch progress, supports AMP, resume checkpoints, early stopping, previews, and atomic Drive backup. Use a distinct experiment name after changing data or architecture so an incompatible last.pt cannot be resumed.
+CenterNet training prints live batch and epoch progress, supports AMP, dataset-fingerprinted resume checkpoints, early stopping, previews, and atomic Drive backup. Use a distinct experiment name after changing data or architecture so an incompatible last.pt cannot be resumed.
 
 Before a full run, validate dataset tensors and a model forward pass. When active code used by Colab changes, deliberately synchronize its source, config, notebook, and annotations into SOS Colab, then verify split counts and file resolution.
 

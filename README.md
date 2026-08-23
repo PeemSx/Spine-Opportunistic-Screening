@@ -45,6 +45,8 @@ dataset/processed/coco contains BUU, Mendeley, and MICCAI 2019 data: 1,403 train
 
 dataset/processed/coco_nih adds NIH ChestX-ray14 annotations: 1,550 train, 194 validation, and 193 test radiographs. The NIH contribution is 147 train, 19 validation, and 18 test images, grouped by patient to prevent leakage. The canonical corner order is TL, TR, BL, BR.
 
+dataset/processed/coco_nih_lumos extends that checkpoint with the reviewed August 10, 2026 Roboflow export: 1,788 train, 223 validation, and 223 test radiographs. It contains 257/32/32 NIH images and 128/16/16 Lumos AP images. Existing assignments are preserved, additional NIH studies are grouped with their patient, and the output uses one canonical `vertebra` category with TL, TR, BL, BR keypoints.
+
 Rebuild the combined dataset with:
 
 ~~~powershell
@@ -53,6 +55,49 @@ python -m src.data.build_coco_nih `
   --nih-root "dataset/raw/NIH/version 0.5" `
   --output-root dataset/processed/coco_nih
 ~~~
+
+Extend that checkpoint with the reviewed Roboflow export using:
+
+~~~powershell
+python -m src.data.build_coco_nih_lumos `
+  --base-root dataset/processed/coco_nih `
+  --increment-root "dataset/raw/Roboflow/10 AUG 2026" `
+  --output-root dataset/processed/coco_nih_lumos `
+  --seed 20260810
+~~~
+
+The Colab training notebook for this dataset is:
+
+    notebooks/colab/train_centernet_hrnet_w18_nih_lumos.ipynb
+
+It uses the distinct experiment `centernet_hrnet_w18_coco_nih_lumos`. Checkpoints include a dataset fingerprint and cannot be resumed against different annotations without an explicit unsafe override.
+
+### Landmark validation during training
+
+Every validation epoch now runs the same normalized landmark protocol used by
+the standalone scorecard, for both raw detections and the selected spine chain.
+The run directory receives:
+
+- `validation_landmark_log.csv`: epoch-level center F1/recall, corner NME,
+  PCK@0.10, usable-vertebra recall, false positives, count MAE, and source
+  robustness summaries.
+- `validation_metrics_latest.json`: complete overall, per-source, vertebral-scale,
+  and source-by-scale summaries.
+- `validation_instances_latest.csv`: matched/missed instance rows with TL, TR,
+  BL, and BR signed residuals. Residuals are prediction minus ground truth, so
+  positive x is right and positive y is down.
+- `best_corner_nme.pt` and `best_usable_recall.pt`, plus matching frozen JSON/CSV
+  artifacts. These supplement `best_loss.pt` and `best_center_f1.pt`.
+
+Scale groups use the GT vertebral diagonal divided by the larger original-image
+dimension: small below 1/16, medium from 1/16 to below 3/32, and large from
+3/32 upward. The two landmark checkpoints are only saved when spine-chain
+detection guardrails pass (by default source-macro F1@0.20D at least 0.85,
+worst-source recall at least 0.75, no more than 1 false positive per image, and
+count MAE no more than 1.5). The thresholds are configurable through the
+corresponding `--landmark-checkpoint-*` training arguments. Research evaluation
+automatically reuses the validation spine-chain settings embedded in these
+training checkpoints unless explicit chain overrides are supplied.
 
 ## Prediction
 

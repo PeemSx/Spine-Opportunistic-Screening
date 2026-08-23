@@ -11,6 +11,8 @@ from src.evaluation.scorecard import (
     evaluate_prediction,
     hungarian_center_match,
     postprocessing_comparison,
+    scale_summary_rows,
+    source_summary_rows,
     valid_quadrilateral,
     vertebral_diagonals,
 )
@@ -166,6 +168,114 @@ class LandmarkAndCountingTests(unittest.TestCase):
         )
         self.assertEqual(item.usable_count, 1)
         self.assertAlmostEqual(item.nmes[0], 0.10, places=6)
+
+    def test_signed_corner_residuals_use_prediction_minus_ground_truth(self) -> None:
+        gt = square(50.0, 50.0, size=20.0)
+        shift = np.asarray([2.0, -3.0], dtype=np.float32)
+        item = evaluate_prediction(
+            model="spine_chain",
+            prediction=prediction([[52.0, 47.0]], [gt + shift]),
+            gt_centers=np.asarray([[50.0, 50.0]], dtype=np.float32),
+            gt_corners=np.asarray([gt]),
+            image="residual.png",
+            image_id=3,
+            source_dataset="source-a",
+            cluster_id="image:3",
+            image_width=100,
+            image_height=100,
+        )
+        matched = item.instance_rows[0]
+        diagonal = float(vertebral_diagonals(np.asarray([gt]))[0])
+        self.assertAlmostEqual(matched["tl_dx_px"], 2.0)
+        self.assertAlmostEqual(matched["tl_dy_px"], -3.0)
+        self.assertAlmostEqual(matched["tl_dx_normalized"], 2.0 / diagonal)
+        self.assertAlmostEqual(matched["tl_dy_normalized"], -3.0 / diagonal)
+
+        summary = aggregate_evaluations(
+            [item],
+            model="spine_chain",
+            scope="overall",
+        )
+        self.assertAlmostEqual(
+            summary["tl_dx_normalized_bias"],
+            2.0 / diagonal,
+        )
+        self.assertAlmostEqual(
+            summary["tl_dy_normalized_bias"],
+            -3.0 / diagonal,
+        )
+
+    def test_scale_breakdown_uses_diagonal_fraction_and_preserves_source(self) -> None:
+        small_gt = square(20.0, 20.0, size=4.0)
+        large_gt = square(60.0, 60.0, size=20.0)
+        items = [
+            evaluate_prediction(
+                model="spine_chain",
+                prediction=prediction([[20.0, 20.0]], [small_gt]),
+                gt_centers=np.asarray([[20.0, 20.0]], dtype=np.float32),
+                gt_corners=np.asarray([small_gt]),
+                image="small.png",
+                image_id=4,
+                source_dataset="source-a",
+                cluster_id="image:4",
+                image_width=100,
+                image_height=100,
+            ),
+            evaluate_prediction(
+                model="spine_chain",
+                prediction=prediction([[60.0, 60.0]], [large_gt]),
+                gt_centers=np.asarray([[60.0, 60.0]], dtype=np.float32),
+                gt_corners=np.asarray([large_gt]),
+                image="large.png",
+                image_id=5,
+                source_dataset="source-b",
+                cluster_id="image:5",
+                image_width=100,
+                image_height=100,
+            ),
+        ]
+        by_scale, by_source_scale = scale_summary_rows(items, "spine_chain")
+        scale_counts = {row["scale_bin"]: row["gt_vertebrae"] for row in by_scale}
+        self.assertEqual(scale_counts, {"small": 1, "large": 1})
+        self.assertEqual(
+            {
+                (row["source_dataset"], row["scale_bin"])
+                for row in by_source_scale
+            },
+            {("source-a", "small"), ("source-b", "large")},
+        )
+
+    def test_worst_source_corner_nme_selects_highest_error(self) -> None:
+        gt = square(50.0, 50.0, size=20.0)
+        items = [
+            evaluate_prediction(
+                model="spine_chain",
+                prediction=prediction([[50.0, 50.0]], [gt]),
+                gt_centers=np.asarray([[50.0, 50.0]], dtype=np.float32),
+                gt_corners=np.asarray([gt]),
+                image="source-a.png",
+                image_id=6,
+                source_dataset="source-a",
+                cluster_id="image:6",
+                image_width=100,
+                image_height=100,
+            ),
+            evaluate_prediction(
+                model="spine_chain",
+                prediction=prediction([[50.0, 50.0]], [gt + [2.0, 0.0]]),
+                gt_centers=np.asarray([[50.0, 50.0]], dtype=np.float32),
+                gt_corners=np.asarray([gt]),
+                image="source-b.png",
+                image_id=7,
+                source_dataset="source-b",
+                cluster_id="image:7",
+                image_width=100,
+                image_height=100,
+            ),
+        ]
+        _, per_source, _, worst = source_summary_rows(items, "spine_chain")
+        expected = max(float(row["corner_nme_mean"]) for row in per_source)
+        self.assertAlmostEqual(worst["corner_nme_mean"], expected)
 
 
 class CobbPostprocessingAndGateTests(unittest.TestCase):

@@ -4,6 +4,7 @@ numpy
 scipy
 Pillow
 matplotlib
+pandas
 PyYAML
 torch
 torchvision

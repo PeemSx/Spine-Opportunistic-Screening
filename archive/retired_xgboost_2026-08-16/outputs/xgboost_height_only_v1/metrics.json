@@ -1,0 +1,48 @@
+{
+  "research_use_only": true,
+  "task": "masked mean vertebral height reconstruction",
+  "rows": [
+    {
+      "split": "val",
+      "source_dataset": "all",
+      "output": "mean_height",
+      "unit": "fraction_of_context_median_height",
+      "samples": 2084,
+      "baseline_mae": 0.07414191732259846,
+      "model_mae": 0.0636373205201878,
+      "baseline_rmse": 0.11020877033887887,
+      "model_rmse": 0.09166841312063076,
+      "baseline_r2": 0.03645101951128504,
+      "model_r2": 0.3333760550533347,
+      "model_median_absolute_error": 0.05110082337253519,
+      "model_p90_absolute_error": 0.14340282826503614,
+      "model_p95_absolute_error": 0.18149842099395846,
+      "baseline_within_5pct_reference_percent": 50.611069486069496,
+      "model_within_5pct_reference_percent": 54.448953823953836,
+      "baseline_within_10pct_reference_percent": 76.52156177156179,
+      "model_within_10pct_reference_percent": 80.19516594516595,
+      "relative_mae_improvement_percent": 14.168229230846793
+    },
+    {
+      "split": "test",
+      "source_dataset": "all",
+      "output": "mean_height",
+      "unit": "fraction_of_context_median_height",
+      "samples": 2168,
+      "baseline_mae": 0.07490705396880053,
+      "model_mae": 0.06331055583916563,
+      "baseline_rmse": 0.11003794152338951,
+      "model_rmse": 0.09146269337958687,
+      "baseline_r2": -0.10954399730750852,
+      "model_r2": 0.2334374718555513,
+      "model_median_absolute_error": 0.04927061627702645,
+      "model_p90_absolute_error": 0.14508901123670706,
+      "model_p95_absolute_error": 0.1920484169533013,
+      "baseline_within_5pct_reference_percent": 50.220198459998066,
+      "model_within_5pct_reference_percent": 55.46373482062762,
+      "baseline_within_10pct_reference_percent": 75.02717344086248,
+      "model_within_10pct_reference_percent": 80.42828933232119,
+      "relative_mae_improvement_percent": 15.481183033129224
+    }
+  ]
+}

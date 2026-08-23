@@ -1,0 +1,81 @@
+{
+  "task": "four-context masked vertebral morphology residual regression",
+  "research_use_only": true,
+  "dataset_root": "C:\\Users\\gcpup\\Desktop\\Workspaces\\AI\\Spine-Opportunistic-Screening\\dataset\\processed\\masked_morphology_coco_nih_lumos",
+  "feature_schema_version": 1,
+  "feature_count": 28,
+  "feature_columns": [
+    "x_m2_left_height_norm",
+    "x_m2_right_height_norm",
+    "x_m2_superior_width_norm",
+    "x_m2_inferior_width_norm",
+    "x_m2_orientation_relative_deg",
+    "x_m2_center_dx_norm",
+    "x_m2_center_dy_norm",
+    "x_m1_left_height_norm",
+    "x_m1_right_height_norm",
+    "x_m1_superior_width_norm",
+    "x_m1_inferior_width_norm",
+    "x_m1_orientation_relative_deg",
+    "x_m1_center_dx_norm",
+    "x_m1_center_dy_norm",
+    "x_p1_left_height_norm",
+    "x_p1_right_height_norm",
+    "x_p1_superior_width_norm",
+    "x_p1_inferior_width_norm",
+    "x_p1_orientation_relative_deg",
+    "x_p1_center_dx_norm",
+    "x_p1_center_dy_norm",
+    "x_p2_left_height_norm",
+    "x_p2_right_height_norm",
+    "x_p2_superior_width_norm",
+    "x_p2_inferior_width_norm",
+    "x_p2_orientation_relative_deg",
+    "x_p2_center_dx_norm",
+    "x_p2_center_dy_norm"
+  ],
+  "outputs": [
+    "left_height",
+    "right_height",
+    "superior_width",
+    "inferior_width",
+    "orientation"
+  ],
+  "split_rows": {
+    "train": 14922,
+    "val": 2084,
+    "test": 2168
+  },
+  "best_iterations": {
+    "left_height": 1146,
+    "right_height": 976,
+    "superior_width": 393,
+    "inferior_width": 570,
+    "orientation": 112
+  },
+  "hyperparameters": {
+    "dataset_root": "dataset\\processed\\masked_morphology_coco_nih_lumos",
+    "output_dir": "outputs\\masked_morphology\\xgboost_four_context_v1",
+    "n_estimators": 1200,
+    "learning_rate": 0.03,
+    "max_depth": 3,
+    "min_child_weight": 4.0,
+    "subsample": 0.85,
+    "colsample_bytree": 0.85,
+    "reg_alpha": 0.0,
+    "reg_lambda": 2.0,
+    "early_stopping_rounds": 60,
+    "n_jobs": 4,
+    "device": "cpu",
+    "seed": 20260813,
+    "limit_per_split": null,
+    "force": true
+  },
+  "software": {
+    "python": "3.12.4 (tags/v3.12.4:8e8a4ba, Jun  6 2024, 19:30:16) [MSC v.1940 64 bit (AMD64)]",
+    "platform": "Windows-11-10.0.26200-SP0",
+    "numpy": "2.5.0",
+    "pandas": "3.0.3",
+    "xgboost": "3.4.0"
+  }
+}

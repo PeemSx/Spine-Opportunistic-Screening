@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import csv
+import json
 import random
 import shutil
 import sys
@@ -38,9 +39,11 @@ if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
 from src.data.centernet_dataset import CenterNetCocoDataset
+from src.data.dataset_provenance import build_dataset_provenance, validate_resume_dataset
 from src.evaluation.center_metrics import CenterMetricAccumulator
 from src.evaluation.centernet_decode import decode_centernet_outputs
-from src.evaluation.config import DEFAULT_PEAK_THRESHOLD
+from src.evaluation.config import DEFAULT_ACCEPTANCE_GATES, DEFAULT_PEAK_THRESHOLD
+from src.evaluation.training_validation import evaluate_validation_landmarks
 from src.models.centernet import SUPPORTED_BACKBONES, build_centernet_model
 from src.training.centernet_loss import CenterNetLoss
 
@@ -67,6 +70,33 @@ LOG_FIELDS = [
     "center_f1_16px",
     "lr",
 ]
+
+LANDMARK_LOG_FIELDS = [
+    "epoch",
+    "guardrails_passed",
+    "raw_center_f1_0.20d",
+    "raw_corner_nme_mean",
+    "raw_pck_0.10",
+    "raw_usable_vertebra_recall",
+    "spine_chain_center_f1_0.20d",
+    "spine_chain_center_recall_0.20d",
+    "spine_chain_corner_nme_mean",
+    "spine_chain_pck_0.10",
+    "spine_chain_usable_vertebra_recall",
+    "spine_chain_false_positives_per_image",
+    "spine_chain_count_mae",
+    "spine_chain_source_macro_center_f1_0.20d",
+    "spine_chain_worst_source_center_recall_0.20d",
+]
+
+VALIDATION_ARTIFACT_NAMES = (
+    "validation_metrics_latest.json",
+    "validation_instances_latest.csv",
+    "best_corner_nme_metrics.json",
+    "best_corner_nme_instances.csv",
+    "best_usable_recall_metrics.json",
+    "best_usable_recall_instances.csv",
+)
 
 
 def seed_everything(seed: int) -> None:
@@ -298,6 +328,7 @@ def save_checkpoint(
     args: argparse.Namespace,
     val_loss: float,
     metrics: dict[str, float],
+    dataset_provenance: dict[str, Any],
 ) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     torch.save(
@@ -310,6 +341,7 @@ def save_checkpoint(
             "args": vars(args),
             "val_loss": val_loss,
             "metrics": metrics,
+            "dataset_provenance": dataset_provenance,
         },
         path,
     )
@@ -322,8 +354,15 @@ def load_training_checkpoint(
     scheduler: torch.optim.lr_scheduler.LRScheduler,
     scaler: torch.cuda.amp.GradScaler,
     device: torch.device,
+    dataset_provenance: dict[str, Any],
+    allow_unsafe_resume: bool = False,
 ) -> tuple[int, dict[str, Any]]:
     checkpoint = torch.load(path, map_location=device)
+    validate_resume_dataset(
+        checkpoint,
+        dataset_provenance,
+        allow_unsafe_resume=allow_unsafe_resume,
+    )
     model.load_state_dict(checkpoint["model_state_dict"])
     if "optimizer_state_dict" in checkpoint:
         optimizer.load_state_dict(checkpoint["optimizer_state_dict"])
@@ -340,7 +379,17 @@ def backup_run_files(run_dir: Path, backup_dir: Path | None) -> None:
     if backup_dir is None:
         return
     backup_dir.mkdir(parents=True, exist_ok=True)
-    for name in ["last.pt", "best_loss.pt", "best_center_f1.pt", "train_log.csv"]:
+    names = [
+        "last.pt",
+        "best_loss.pt",
+        "best_center_f1.pt",
+        "best_corner_nme.pt",
+        "best_usable_recall.pt",
+        "train_log.csv",
+        "validation_landmark_log.csv",
+        *VALIDATION_ARTIFACT_NAMES,
+    ]
+    for name in names:
         src = run_dir / name
         if src.exists():
             destination = backup_dir / name
@@ -356,6 +405,162 @@ def append_log(log_path: Path, row: dict[str, float]) -> None:
         if not exists:
             writer.writeheader()
         writer.writerow({field: row.get(field, "") for field in LOG_FIELDS})
+
+
+def append_landmark_log(log_path: Path, row: dict[str, Any]) -> None:
+    exists = log_path.exists()
+    with log_path.open("a", newline="", encoding="utf-8") as file:
+        writer = csv.DictWriter(file, fieldnames=LANDMARK_LOG_FIELDS)
+        if not exists:
+            writer.writeheader()
+        writer.writerow({field: row.get(field, "") for field in LANDMARK_LOG_FIELDS})
+
+
+def read_best_landmark_values(
+    log_path: Path,
+    args: argparse.Namespace,
+) -> tuple[float, float]:
+    best_corner_nme = float("inf")
+    best_usable_recall = -1.0
+    if not log_path.exists():
+        return best_corner_nme, best_usable_recall
+
+    with log_path.open("r", newline="", encoding="utf-8") as file:
+        for row in csv.DictReader(file):
+            try:
+                row_metrics = {
+                    field: float(row[field])
+                    for field in LANDMARK_LOG_FIELDS
+                    if field.startswith(("raw_", "spine_chain_"))
+                    and row.get(field, "") != ""
+                }
+            except ValueError:
+                continue
+            if not landmark_checkpoint_guardrails(row_metrics, args)["passed"]:
+                continue
+            corner_nme = row_metrics.get("spine_chain_corner_nme_mean")
+            usable_recall = row_metrics.get(
+                "spine_chain_usable_vertebra_recall"
+            )
+            if corner_nme is None or usable_recall is None:
+                continue
+            best_corner_nme = min(best_corner_nme, corner_nme)
+            best_usable_recall = max(best_usable_recall, usable_recall)
+    return best_corner_nme, best_usable_recall
+
+
+def landmark_checkpoint_guardrails(
+    metrics: dict[str, float],
+    args: argparse.Namespace,
+) -> dict[str, Any]:
+    checks = {
+        "source_macro_center_f1_0.20d": {
+            "observed": metrics.get(
+                "spine_chain_source_macro_center_f1_0.20d"
+            ),
+            "operator": ">=",
+            "threshold": float(args.landmark_checkpoint_min_f1_020d),
+        },
+        "worst_source_recall_0.20d": {
+            "observed": metrics.get(
+                "spine_chain_worst_source_center_recall_0.20d"
+            ),
+            "operator": ">=",
+            "threshold": float(
+                args.landmark_checkpoint_min_worst_source_recall_020d
+            ),
+        },
+        "false_positives_per_image": {
+            "observed": metrics.get("spine_chain_false_positives_per_image"),
+            "operator": "<=",
+            "threshold": float(args.landmark_checkpoint_max_fp_per_image),
+        },
+        "count_mae": {
+            "observed": metrics.get("spine_chain_count_mae"),
+            "operator": "<=",
+            "threshold": float(args.landmark_checkpoint_max_count_mae),
+        },
+    }
+    for check in checks.values():
+        observed = check["observed"]
+        if observed is None or not np.isfinite(float(observed)):
+            check["passed"] = False
+        elif check["operator"] == ">=":
+            check["passed"] = float(observed) >= float(check["threshold"])
+        else:
+            check["passed"] = float(observed) <= float(check["threshold"])
+    return {
+        "passed": all(bool(check["passed"]) for check in checks.values()),
+        "checks": checks,
+    }
+
+
+def merge_best_landmark_values(
+    *,
+    best_corner_nme: float,
+    best_usable_recall: float,
+    metrics: dict[str, float],
+    args: argparse.Namespace,
+) -> tuple[float, float]:
+    if not landmark_checkpoint_guardrails(metrics, args)["passed"]:
+        return best_corner_nme, best_usable_recall
+
+    corner_nme = metrics.get("spine_chain_corner_nme_mean")
+    if corner_nme is not None and np.isfinite(float(corner_nme)):
+        best_corner_nme = min(best_corner_nme, float(corner_nme))
+
+    usable_recall = metrics.get("spine_chain_usable_vertebra_recall")
+    if usable_recall is not None and np.isfinite(float(usable_recall)):
+        best_usable_recall = max(best_usable_recall, float(usable_recall))
+    return best_corner_nme, best_usable_recall
+
+
+def _atomic_json_write(path: Path, payload: dict[str, Any]) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    temporary = path.with_name(path.name + ".tmp")
+    with temporary.open("w", encoding="utf-8") as file:
+        json.dump(payload, file, indent=2, allow_nan=False)
+    temporary.replace(path)
+
+
+def _atomic_csv_write(path: Path, rows: list[dict[str, Any]]) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    temporary = path.with_name(path.name + ".tmp")
+    fieldnames = sorted({key for row in rows for key in row})
+    with temporary.open("w", newline="", encoding="utf-8") as file:
+        if fieldnames:
+            writer = csv.DictWriter(file, fieldnames=fieldnames)
+            writer.writeheader()
+            writer.writerows(
+                {
+                    field: row.get(field, "")
+                    for field in fieldnames
+                }
+                for row in rows
+            )
+    temporary.replace(path)
+
+
+def write_validation_artifacts(
+    run_dir: Path,
+    report: dict[str, Any],
+    instance_rows: list[dict[str, Any]],
+) -> None:
+    _atomic_json_write(run_dir / "validation_metrics_latest.json", report)
+    _atomic_csv_write(run_dir / "validation_instances_latest.csv", instance_rows)
+
+
+def snapshot_validation_artifacts(run_dir: Path, checkpoint_stem: str) -> None:
+    artifact_sources = {
+        "metrics.json": run_dir / "validation_metrics_latest.json",
+        "instances.csv": run_dir / "validation_instances_latest.csv",
+    }
+    for suffix, source in artifact_sources.items():
+        destination = run_dir / f"{checkpoint_stem}_{suffix}"
+        if source.exists():
+            temporary = destination.with_name(destination.name + ".tmp")
+            shutil.copy2(source, temporary)
+            temporary.replace(destination)
 
 
 def read_best_values_from_log(log_path: Path, early_stop_metric: str) -> tuple[float, float, float | None]:
@@ -422,6 +627,40 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--wh-weight", type=float, default=0.1)
     parser.add_argument("--peak-thresh", type=float, default=DEFAULT_PEAK_THRESHOLD)
     parser.add_argument("--eval-topk", type=int, default=100)
+    parser.add_argument("--val-chain-duplicate-iou", type=float, default=0.18)
+    parser.add_argument("--val-chain-duplicate-center-scale", type=float, default=0.35)
+    parser.add_argument("--val-chain-score-thresh", type=float, default=0.18)
+    parser.add_argument("--val-chain-score-weight", type=float, default=3.0)
+    parser.add_argument("--val-chain-min-len", type=int, default=3)
+    parser.add_argument(
+        "--landmark-checkpoint-min-source-macro-f1-020d",
+        "--landmark-checkpoint-min-f1-020d",
+        dest="landmark_checkpoint_min_f1_020d",
+        type=float,
+        default=DEFAULT_ACCEPTANCE_GATES["source_macro_f1_0.20d_min"],
+        help=(
+            "Minimum validation spine-chain source-macro F1@0.20D for "
+            "landmark checkpoints."
+        ),
+    )
+    parser.add_argument(
+        "--landmark-checkpoint-min-worst-source-recall-020d",
+        type=float,
+        default=DEFAULT_ACCEPTANCE_GATES["worst_source_recall_0.20d_min"],
+        help="Minimum worst-source validation spine-chain recall@0.20D.",
+    )
+    parser.add_argument(
+        "--landmark-checkpoint-max-fp-per-image",
+        type=float,
+        default=1.0,
+        help="Maximum validation spine-chain false positives per image.",
+    )
+    parser.add_argument(
+        "--landmark-checkpoint-max-count-mae",
+        type=float,
+        default=DEFAULT_ACCEPTANCE_GATES["count_mae_max"],
+        help="Maximum validation spine-chain count MAE.",
+    )
     parser.add_argument("--seed", type=int, default=20260627)
     parser.add_argument("--device", type=str, default="auto", choices=["auto", "cpu", "cuda"])
     parser.add_argument("--backbone", type=str, default="hrnet_w18", choices=SUPPORTED_BACKBONES)
@@ -440,6 +679,11 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--max-val-batches", type=int, default=None)
     parser.add_argument("--keep-epoch-checkpoints", action="store_true")
     parser.add_argument("--resume-checkpoint", type=Path, default=None)
+    parser.add_argument(
+        "--allow-unsafe-resume",
+        action="store_true",
+        help="Allow legacy or dataset-mismatched resume checkpoints after manual verification.",
+    )
     parser.add_argument("--early-stop-patience", type=int, default=0)
     parser.add_argument(
         "--early-stop-metric",
@@ -487,6 +731,7 @@ def main() -> None:
         augment=False,
         limit=val_limit,
     )
+    dataset_provenance = build_dataset_provenance(args.dataset_root)
 
     train_loader = DataLoader(
         train_dataset,
@@ -515,9 +760,14 @@ def main() -> None:
     scaler = torch.cuda.amp.GradScaler(enabled=use_amp)
 
     log_path = run_dir / "train_log.csv"
+    landmark_log_path = run_dir / "validation_landmark_log.csv"
     best_loss, best_center_f1, best_early_stop_metric = read_best_values_from_log(
         log_path,
         args.early_stop_metric,
+    )
+    best_corner_nme, best_usable_recall = read_best_landmark_values(
+        landmark_log_path,
+        args,
     )
     epochs_without_improvement = 0
     start_epoch = 1
@@ -530,12 +780,20 @@ def main() -> None:
             scheduler=scheduler,
             scaler=scaler,
             device=device,
+            dataset_provenance=dataset_provenance,
+            allow_unsafe_resume=args.allow_unsafe_resume,
         )
         if best_loss == float("inf"):
             best_loss = float(resume_checkpoint_data.get("val_loss", float("inf")))
         metrics = resume_checkpoint_data.get("metrics", {})
         if best_center_f1 < 0.0:
             best_center_f1 = float(metrics.get("center_f1_12px", -1.0))
+        best_corner_nme, best_usable_recall = merge_best_landmark_values(
+            best_corner_nme=best_corner_nme,
+            best_usable_recall=best_usable_recall,
+            metrics=metrics,
+            args=args,
+        )
         if best_early_stop_metric is None:
             metric_value = resume_checkpoint_data.get("val_loss") if args.early_stop_metric == "val_loss" else metrics.get(args.early_stop_metric)
             if metric_value is not None:
@@ -544,6 +802,12 @@ def main() -> None:
     print(f"device: {device}")
     print(f"backbone: {args.backbone}")
     print(f"train images: {len(train_dataset)} | val images: {len(val_dataset)}")
+    print(
+        "dataset: {} | fingerprint: {}".format(
+            dataset_provenance["dataset_version"],
+            dataset_provenance["fingerprint"][:12],
+        )
+    )
     print(f"run dir: {run_dir}")
     if backup_dir is not None:
         print(f"backup dir: {backup_dir}")
@@ -557,6 +821,14 @@ def main() -> None:
             flush=True,
         )
         return
+
+    validation_chain_settings = {
+        "duplicate_iou": float(args.val_chain_duplicate_iou),
+        "duplicate_center_scale": float(args.val_chain_duplicate_center_scale),
+        "score_thresh": float(args.val_chain_score_thresh),
+        "score_weight": float(args.val_chain_score_weight),
+        "min_len": int(args.val_chain_min_len),
+    }
 
     for epoch in range(start_epoch, args.epochs + 1):
         print(f"\n=== Epoch {epoch}/{args.epochs} ===", flush=True)
@@ -603,22 +875,43 @@ def main() -> None:
             ),
             flush=True,
         )
-        center_metrics = evaluate_centers(
+        validation_result = evaluate_validation_landmarks(
             model=model,
             loader=val_loader,
             device=device,
             down_ratio=args.down_ratio,
             peak_thresh=args.peak_thresh,
             topk=args.eval_topk,
+            chain_settings=validation_chain_settings,
             max_batches=args.max_val_batches,
             epoch=epoch,
             total_epochs=args.epochs,
             progress_every=args.progress_every,
         )
+        center_metrics = validation_result.flat_metrics
+        landmark_guardrails = landmark_checkpoint_guardrails(center_metrics, args)
+        validation_report = dict(validation_result.report)
+        validation_report["checkpoint_guardrails"] = landmark_guardrails
+        validation_report["flat_metrics"] = center_metrics
+        write_validation_artifacts(
+            run_dir,
+            validation_report,
+            validation_result.instance_rows,
+        )
+        landmark_log_row = {
+            "epoch": epoch,
+            "guardrails_passed": landmark_guardrails["passed"],
+            **center_metrics,
+        }
+        append_landmark_log(landmark_log_path, landmark_log_row)
         scheduler.step()
 
         val_loss = val_stats["loss"]
         center_f1 = center_metrics.get("center_f1_12px", 0.0)
+        corner_nme = center_metrics.get("spine_chain_corner_nme_mean")
+        usable_recall = center_metrics.get(
+            "spine_chain_usable_vertebra_recall"
+        )
         row = {
             "epoch": epoch,
             "train_loss": train_stats["loss"],
@@ -634,15 +927,62 @@ def main() -> None:
         }
         append_log(log_path, row)
 
-        save_checkpoint(run_dir / "last.pt", model, optimizer, scheduler, scaler, epoch, args, val_loss, center_metrics)
+        save_checkpoint(
+            run_dir / "last.pt", model, optimizer, scheduler, scaler, epoch, args,
+            val_loss, center_metrics, dataset_provenance,
+        )
         if args.keep_epoch_checkpoints:
-            save_checkpoint(run_dir / "checkpoints" / f"epoch_{epoch:03d}.pt", model, optimizer, scheduler, scaler, epoch, args, val_loss, center_metrics)
+            save_checkpoint(
+                run_dir / "checkpoints" / f"epoch_{epoch:03d}.pt", model, optimizer,
+                scheduler, scaler, epoch, args, val_loss, center_metrics,
+                dataset_provenance,
+            )
         if val_loss < best_loss:
             best_loss = val_loss
-            save_checkpoint(run_dir / "best_loss.pt", model, optimizer, scheduler, scaler, epoch, args, val_loss, center_metrics)
+            save_checkpoint(
+                run_dir / "best_loss.pt", model, optimizer, scheduler, scaler, epoch,
+                args, val_loss, center_metrics, dataset_provenance,
+            )
         if center_f1 > best_center_f1:
             best_center_f1 = center_f1
-            save_checkpoint(run_dir / "best_center_f1.pt", model, optimizer, scheduler, scaler, epoch, args, val_loss, center_metrics)
+            save_checkpoint(
+                run_dir / "best_center_f1.pt", model, optimizer, scheduler, scaler,
+                epoch, args, val_loss, center_metrics, dataset_provenance,
+            )
+        if landmark_guardrails["passed"]:
+            if corner_nme is not None and float(corner_nme) < best_corner_nme:
+                best_corner_nme = float(corner_nme)
+                save_checkpoint(
+                    run_dir / "best_corner_nme.pt",
+                    model,
+                    optimizer,
+                    scheduler,
+                    scaler,
+                    epoch,
+                    args,
+                    val_loss,
+                    center_metrics,
+                    dataset_provenance,
+                )
+                snapshot_validation_artifacts(run_dir, "best_corner_nme")
+            if (
+                usable_recall is not None
+                and float(usable_recall) > best_usable_recall
+            ):
+                best_usable_recall = float(usable_recall)
+                save_checkpoint(
+                    run_dir / "best_usable_recall.pt",
+                    model,
+                    optimizer,
+                    scheduler,
+                    scaler,
+                    epoch,
+                    args,
+                    val_loss,
+                    center_metrics,
+                    dataset_provenance,
+                )
+                snapshot_validation_artifacts(run_dir, "best_usable_recall")
 
         if args.save_preview_every > 0 and (epoch == 1 or epoch % args.save_preview_every == 0):
             save_prediction_previews(
@@ -672,14 +1012,16 @@ def main() -> None:
             epochs_without_improvement += 1
 
         print(
-            "epoch {}/{} complete | train {:.4f} | val {:.4f} | f1@12 {:.4f} | recall@12 {:.4f} | count_mae {:.3f} | early-stop {}/{} (best {:.6f})".format(
+            "epoch {}/{} complete | train {:.4f} | val {:.4f} | f1@12 {:.4f} | chain f1@0.20D {:.4f} | NME {:.4f} | usable {:.4f} | landmark guards {} | early-stop {}/{} (best {:.6f})".format(
                 epoch,
                 args.epochs,
                 train_stats["loss"],
                 val_loss,
                 center_metrics.get("center_f1_12px", 0.0),
-                center_metrics.get("center_recall_12px", 0.0),
-                center_metrics.get("count_mae", 0.0),
+                center_metrics.get("spine_chain_center_f1_0.20d", 0.0),
+                float(corner_nme) if corner_nme is not None else float("nan"),
+                float(usable_recall) if usable_recall is not None else float("nan"),
+                "pass" if landmark_guardrails["passed"] else "fail",
                 epochs_without_improvement,
                 args.early_stop_patience,
                 best_early_stop_metric if best_early_stop_metric is not None else float("nan"),

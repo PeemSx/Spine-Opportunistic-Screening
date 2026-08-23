@@ -19,6 +19,14 @@ from src.evaluation.config import (
 )
 
 
+VERTEBRA_SCALE_BINS = (
+    ("small", 0.0, 1.0 / 16.0),
+    ("medium", 1.0 / 16.0, 3.0 / 32.0),
+    ("large", 3.0 / 32.0, float("inf")),
+)
+CORNER_NAMES = ("tl", "tr", "bl", "br")
+
+
 def threshold_label(value: float) -> str:
     return f"{float(value):.2f}"
 
@@ -336,10 +344,10 @@ def evaluate_prediction(
     ]
 
     for match in primary_matches:
-        corner_errors = np.linalg.norm(
-            pred_corners[match.pred_index] - gt_corners[match.gt_index],
-            axis=1,
+        corner_residuals = (
+            pred_corners[match.pred_index] - gt_corners[match.gt_index]
         )
+        corner_errors = np.linalg.norm(corner_residuals, axis=1)
         normalized_errors = corner_errors / float(diagonals[match.gt_index])
         nme = float(np.mean(normalized_errors))
         geometry_valid = pred_geometry_valid[match.pred_index]
@@ -364,14 +372,25 @@ def evaluate_prediction(
             "center_error_px": match.distance_px,
             "normalized_center_error": match.normalized_distance,
             "gt_diagonal_px": float(diagonals[match.gt_index]),
+            "gt_diagonal_fraction": float(
+                diagonals[match.gt_index] / max(image_width, image_height, 1)
+            ),
             "corner_nme": nme,
             "valid_quadrilateral": geometry_valid,
             "inside_image": inside_image,
             "usable": usable,
         }
-        for corner_index, name in enumerate(("tl", "tr", "bl", "br")):
+        for corner_index, name in enumerate(CORNER_NAMES):
             row[f"{name}_error_px"] = float(corner_errors[corner_index])
             row[f"{name}_normalized_error"] = float(normalized_errors[corner_index])
+            row[f"{name}_dx_px"] = float(corner_residuals[corner_index, 0])
+            row[f"{name}_dy_px"] = float(corner_residuals[corner_index, 1])
+            row[f"{name}_dx_normalized"] = float(
+                corner_residuals[corner_index, 0] / diagonals[match.gt_index]
+            )
+            row[f"{name}_dy_normalized"] = float(
+                corner_residuals[corner_index, 1] / diagonals[match.gt_index]
+            )
         for threshold in PCK_THRESHOLDS:
             label = threshold_label(threshold)
             correct = normalized_errors <= threshold + NUMERICAL_TOLERANCE
@@ -419,6 +438,9 @@ def evaluate_prediction(
             "gt_index": gt_index,
             "score": None,
             "gt_diagonal_px": float(diagonals[gt_index]),
+            "gt_diagonal_fraction": float(
+                diagonals[gt_index] / max(image_width, image_height, 1)
+            ),
             "usable": False,
         }
         for threshold in MATCH_THRESHOLDS:
@@ -503,6 +525,153 @@ def _percentile(values: list[float], percentile: float) -> float | None:
     return float(np.percentile(values, percentile)) if values else None
 
 
+def _add_corner_residual_metrics(
+    summary: dict[str, Any],
+    matched_rows: list[dict[str, Any]],
+) -> None:
+    for corner in CORNER_NAMES:
+        for axis in ("dx", "dy"):
+            for coordinate_space in ("px", "normalized"):
+                key = f"{corner}_{axis}_{coordinate_space}"
+                values = [
+                    float(row[key])
+                    for row in matched_rows
+                    if row.get(key) is not None
+                    and np.isfinite(float(row[key]))
+                ]
+                summary[f"{key}_bias"] = (
+                    float(np.mean(values)) if values else None
+                )
+                summary[f"{key}_mae"] = (
+                    float(np.mean(np.abs(values))) if values else None
+                )
+
+
+def vertebra_scale_label(diagonal_fraction: float) -> str:
+    value = float(diagonal_fraction)
+    for label, lower, upper in VERTEBRA_SCALE_BINS:
+        if lower <= value < upper:
+            return label
+    return VERTEBRA_SCALE_BINS[-1][0]
+
+
+def aggregate_landmark_rows(
+    rows: list[dict[str, Any]],
+    *,
+    model: str,
+    scope: str,
+    source_dataset: str | None = None,
+    scale_bin: str | None = None,
+) -> dict[str, Any]:
+    gt_rows = [
+        row
+        for row in rows
+        if row.get("status") in {"matched", "missed_ground_truth"}
+    ]
+    matched_rows = [row for row in gt_rows if row.get("status") == "matched"]
+    gt_total = len(gt_rows)
+    matched_total = len(matched_rows)
+    summary: dict[str, Any] = {
+        "model": model,
+        "scope": scope,
+        "source_dataset": source_dataset,
+        "scale_bin": scale_bin,
+        "gt_vertebrae": gt_total,
+        "matched_vertebrae_0.20d": matched_total,
+        "center_recall_0.20d": _safe_rate(matched_total, gt_total),
+        "usable_vertebrae": sum(bool(row.get("usable")) for row in matched_rows),
+    }
+    summary["usable_vertebra_recall"] = _safe_rate(
+        summary["usable_vertebrae"],
+        gt_total,
+    )
+
+    nmes = [
+        float(row["corner_nme"])
+        for row in matched_rows
+        if row.get("corner_nme") is not None
+    ]
+    summary["corner_nme_mean"] = float(np.mean(nmes)) if nmes else None
+    summary["corner_nme_median"] = _percentile(nmes, 50.0)
+    summary["corner_nme_p95"] = _percentile(nmes, 95.0)
+
+    normalized_errors = [
+        float(row[f"{corner}_normalized_error"])
+        for row in matched_rows
+        for corner in CORNER_NAMES
+        if row.get(f"{corner}_normalized_error") is not None
+    ]
+    for threshold in PCK_THRESHOLDS:
+        label = threshold_label(threshold)
+        correct = sum(
+            value <= threshold + NUMERICAL_TOLERANCE
+            for value in normalized_errors
+        )
+        summary[f"pck_{label}"] = _safe_rate(correct, len(normalized_errors))
+        summary[f"end_to_end_pck_{label}"] = _safe_rate(correct, gt_total * 4)
+
+    _add_corner_residual_metrics(summary, matched_rows)
+    return summary
+
+
+def scale_summary_rows(
+    evaluations: list[ImageEvaluation],
+    model: str,
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    instance_rows = [
+        row
+        for item in evaluations
+        for row in item.instance_rows
+        if row.get("status") in {"matched", "missed_ground_truth"}
+    ]
+    by_scale: list[dict[str, Any]] = []
+    by_source_scale: list[dict[str, Any]] = []
+    sources = sorted({str(row["source_dataset"]) for row in instance_rows})
+
+    for label, lower, upper in VERTEBRA_SCALE_BINS:
+        scale_rows = [
+            row
+            for row in instance_rows
+            if vertebra_scale_label(float(row["gt_diagonal_fraction"])) == label
+        ]
+        if not scale_rows:
+            continue
+        scale_summary = aggregate_landmark_rows(
+            scale_rows,
+            model=model,
+            scope="vertebra_scale",
+            scale_bin=label,
+        )
+        scale_summary["diagonal_fraction_min"] = lower
+        scale_summary["diagonal_fraction_max"] = (
+            upper if np.isfinite(upper) else None
+        )
+        by_scale.append(scale_summary)
+
+        for source in sources:
+            source_rows = [
+                row
+                for row in scale_rows
+                if str(row["source_dataset"]) == source
+            ]
+            if not source_rows:
+                continue
+            source_summary = aggregate_landmark_rows(
+                source_rows,
+                model=model,
+                scope="source_vertebra_scale",
+                source_dataset=source,
+                scale_bin=label,
+            )
+            source_summary["diagonal_fraction_min"] = lower
+            source_summary["diagonal_fraction_max"] = (
+                upper if np.isfinite(upper) else None
+            )
+            by_source_scale.append(source_summary)
+
+    return by_scale, by_source_scale
+
+
 def aggregate_evaluations(
     evaluations: list[ImageEvaluation],
     *,
@@ -579,6 +748,13 @@ def aggregate_evaluations(
         sum(item.usable_count for item in evaluations),
         gt_total,
     )
+    matched_rows = [
+        instance_row
+        for item in evaluations
+        for instance_row in item.instance_rows
+        if instance_row.get("status") == "matched"
+    ]
+    _add_corner_residual_metrics(row, matched_rows)
     row["invalid_geometry_rate"] = _safe_rate(
         sum(item.invalid_geometry_count for item in evaluations),
         pred_total,
@@ -733,6 +909,7 @@ def source_summary_rows(
     }
     lower_is_better_tokens = (
         "mae",
+        "nme",
         "rmse",
         "p95",
         "false_positives",
@@ -751,11 +928,14 @@ def source_summary_rows(
             worst[key] = None
             continue
         macro[key] = float(np.mean(values))
-        worst[key] = (
-            max(values)
-            if any(token in key for token in lower_is_better_tokens)
-            else min(values)
-        )
+        if key.endswith("_bias"):
+            worst[key] = max(values, key=abs)
+        else:
+            worst[key] = (
+                max(values)
+                if any(token in key for token in lower_is_better_tokens)
+                else min(values)
+            )
     return overall, per_source, macro, worst
 
 

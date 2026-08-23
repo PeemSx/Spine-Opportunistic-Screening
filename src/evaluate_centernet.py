@@ -312,27 +312,27 @@ def build_model_and_settings(
             "duplicate_iou": float(
                 args.chain_duplicate_iou
                 if args.chain_duplicate_iou is not None
-                else 0.18
+                else train_args.get("val_chain_duplicate_iou", 0.18)
             ),
             "duplicate_center_scale": float(
                 args.chain_duplicate_center_scale
                 if args.chain_duplicate_center_scale is not None
-                else 0.35
+                else train_args.get("val_chain_duplicate_center_scale", 0.35)
             ),
             "score_thresh": float(
                 args.chain_score_thresh
                 if args.chain_score_thresh is not None
-                else 0.18
+                else train_args.get("val_chain_score_thresh", 0.18)
             ),
             "score_weight": float(
                 args.chain_score_weight
                 if args.chain_score_weight is not None
-                else 3.0
+                else train_args.get("val_chain_score_weight", 3.0)
             ),
             "min_len": int(
                 args.chain_min_len
                 if args.chain_min_len is not None
-                else 3
+                else train_args.get("val_chain_min_len", 3)
             ),
         }
 

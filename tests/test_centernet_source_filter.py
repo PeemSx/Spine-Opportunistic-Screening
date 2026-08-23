@@ -52,6 +52,19 @@ class CenterNetSourceFilterTests(unittest.TestCase):
                     source_dataset="missing",
                 )
 
+    def test_lumos_case_id_is_used_for_evaluation_clustering(self) -> None:
+        self.assertEqual(
+            CenterNetCocoDataset._patient_cluster_id(
+                {
+                    "id": 7,
+                    "file_name": "images/lumos_ap/lumos_AP_106.png",
+                    "source_dataset": "Lumos AP",
+                    "lumos_case_id": "106",
+                }
+            ),
+            "lumos:106",
+        )
+
 
 if __name__ == "__main__":
     unittest.main()
