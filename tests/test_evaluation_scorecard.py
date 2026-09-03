@@ -339,6 +339,7 @@ class CobbPostprocessingAndGateTests(unittest.TestCase):
             scope="overall",
         )
         comparison = postprocessing_comparison(raw, chain)
+        self.assertEqual(chain["center_f1_0.15d"], 1.0)
         self.assertEqual(comparison["false_positive_reduction"], 1.0)
         self.assertEqual(comparison["recall_loss_0.20d"], 0.0)
         self.assertLess(comparison["count_mae_change"], 0.0)

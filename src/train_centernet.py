@@ -44,7 +44,11 @@ from src.evaluation.center_metrics import CenterMetricAccumulator
 from src.evaluation.centernet_decode import decode_centernet_outputs
 from src.evaluation.config import DEFAULT_ACCEPTANCE_GATES, DEFAULT_PEAK_THRESHOLD
 from src.evaluation.training_validation import evaluate_validation_landmarks
-from src.models.centernet import SUPPORTED_BACKBONES, build_centernet_model
+from src.models.centernet import (
+    SUPPORTED_BACKBONES,
+    build_centernet_model,
+    model_initialization_metadata,
+)
 from src.training.centernet_loss import CenterNetLoss
 
 
@@ -342,6 +346,7 @@ def save_checkpoint(
             "val_loss": val_loss,
             "metrics": metrics,
             "dataset_provenance": dataset_provenance,
+            "model_initialization": model_initialization_metadata(model),
         },
         path,
     )
@@ -357,7 +362,11 @@ def load_training_checkpoint(
     dataset_provenance: dict[str, Any],
     allow_unsafe_resume: bool = False,
 ) -> tuple[int, dict[str, Any]]:
-    checkpoint = torch.load(path, map_location=device)
+    checkpoint = torch.load(
+        path,
+        map_location=device,
+        weights_only=False,
+    )
     validate_resume_dataset(
         checkpoint,
         dataset_provenance,
@@ -749,6 +758,7 @@ def main() -> None:
     )
 
     model = build_centernet_model(backbone=args.backbone, pretrained=args.pretrained).to(device)
+    initialization = model_initialization_metadata(model)
     criterion = CenterNetLoss(
         hm_weight=args.hm_weight,
         reg_weight=args.reg_weight,
@@ -801,6 +811,16 @@ def main() -> None:
 
     print(f"device: {device}")
     print(f"backbone: {args.backbone}")
+    print(
+        "initialization: {}{}".format(
+            "pretrained" if initialization["pretrained"] else "random",
+            (
+                f" ({initialization['pretrained_backbone_id']})"
+                if initialization["pretrained_backbone_id"] is not None
+                else ""
+            ),
+        )
+    )
     print(f"train images: {len(train_dataset)} | val images: {len(val_dataset)}")
     print(
         "dataset: {} | fingerprint: {}".format(

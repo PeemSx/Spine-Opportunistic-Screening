@@ -28,6 +28,20 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--num-workers", type=int, default=0)
     parser.add_argument("--limit", type=int, default=4)
     parser.add_argument("--backbone", type=str, default="hrnet_w18", choices=SUPPORTED_BACKBONES)
+    parser.add_argument("--hm-weight", type=float, default=1.0)
+    parser.add_argument("--reg-weight", type=float, default=1.0)
+    parser.add_argument("--wh-weight", type=float, default=0.1)
+    parser.add_argument(
+        "--pretrained",
+        action="store_true",
+        help="Load the explicit pretrained backbone weights during the model-forward check.",
+    )
+    parser.add_argument(
+        "--device",
+        choices=["auto", "cpu", "cuda"],
+        default="auto",
+        help="Device used by --model-forward.",
+    )
     parser.add_argument("--model-forward", action="store_true")
     return parser.parse_args()
 
@@ -66,10 +80,27 @@ def main() -> None:
         raise RuntimeError("heatmap max is unexpectedly low")
 
     if args.model_forward:
-        model = build_centernet_model(backbone=args.backbone, pretrained=False)
-        criterion = CenterNetLoss()
-        outputs = model(batch["input"])
-        loss = criterion.loss_dict(outputs, batch)
+        device = torch.device(
+            "cuda" if args.device == "auto" and torch.cuda.is_available() else (
+                "cpu" if args.device == "auto" else args.device
+            )
+        )
+        model = build_centernet_model(
+            backbone=args.backbone,
+            pretrained=args.pretrained,
+        ).to(device)
+        criterion = CenterNetLoss(
+            hm_weight=args.hm_weight,
+            reg_weight=args.reg_weight,
+            wh_weight=args.wh_weight,
+        )
+        batch_on_device = {
+            key: value.to(device) if torch.is_tensor(value) else value
+            for key, value in batch.items()
+        }
+        outputs = model(batch_on_device["input"])
+        loss = criterion.loss_dict(outputs, batch_on_device)
+        print("model device:", device)
         print("model outputs:", {key: tuple(value.shape) for key, value in outputs.items()})
         print("loss:", {key: float(value.detach()) for key, value in loss.items()})
 

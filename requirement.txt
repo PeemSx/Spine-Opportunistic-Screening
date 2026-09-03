@@ -9,4 +9,4 @@ PyYAML
 torch
 torchvision
 tqdm
-timm
+timm==1.0.26

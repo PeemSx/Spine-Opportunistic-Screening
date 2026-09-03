@@ -1,0 +1,37 @@
+{
+  "annotation_sha256": "6a91c1d7df01bfd5db1b1566e69ba46895a87aadcfa2f1661e9ba3a1c49febe8",
+  "cache_path": "/Users/gcpuppy/Documents/AI/Spinal AI/Spine-Opportunistic-Screening/notebooks/experiments/spine chain weights/artifacts/cache/best_loss_test_raw_predictions.npz",
+  "cache_sha256": "c18087c3cba0e367acfa32375a8c2507a2537266b79b99e2cdfc62b4ecbcf980",
+  "checkpoint_path": "/Users/gcpuppy/Documents/AI/Spinal AI/Spine-Opportunistic-Screening/outputs/models/48 epochs/best_loss.pt",
+  "checkpoint_sha256": "efda247ca6faa0baf94a94141cd9f1d3bec880029ce8a3414ddbe9ba2fb61bad",
+  "created_at_utc": "2026-08-30T10:19:25.993745+00:00",
+  "dataset_fingerprint": "d99fbd046ece0cd2d10598fa1fb1da0eed24cb8542270f54a732616c8cb9e8f3",
+  "dataset_root": "/Users/gcpuppy/Documents/AI/Spinal AI/Spine-Opportunistic-Screening/dataset/processed",
+  "dataset_version": "coco_nih_lumos",
+  "fixed_settings": {
+    "down_ratio": 4,
+    "duplicate_center_scale": 0.35,
+    "duplicate_iou": 0.18,
+    "input_size": 1024,
+    "max_objects": 64,
+    "min_len": 3,
+    "peak_thresh": 0.1,
+    "score_thresh": 0.18,
+    "topk": 50
+  },
+  "image_count": 223,
+  "max_ground_truth": 23,
+  "max_predictions": 31,
+  "model_key": "best_loss",
+  "schema_version": 1,
+  "source_counts": {
+    "BUU AP": 40,
+    "Lumos AP": 16,
+    "MICCAI-2019": 48,
+    "Mendeley PA": 87,
+    "NIH ChestX-ray14": 32
+  },
+  "source_epoch": 35,
+  "split": "test",
+  "state_sha256": "0dd6965919d04ef55e0276f42ffea7056db8e68b5464972874bad3624c2ac06d"
+}

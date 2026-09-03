@@ -5,6 +5,7 @@ import csv
 import hashlib
 import json
 import pathlib
+import pickle
 import sys
 from dataclasses import dataclass
 from pathlib import Path
@@ -141,13 +142,50 @@ def file_sha256(path: Path) -> str:
     return digest.hexdigest()
 
 
+class _PathlibCompatUnpickler(pickle.Unpickler):
+    def find_class(self, module: str, name: str) -> Any:
+        if module == "pathlib._local":
+            module = "pathlib"
+        return super().find_class(module, name)
+
+
+class _PathlibCompatPickleModule:
+    __name__ = "pickle"
+    Unpickler = _PathlibCompatUnpickler
+    load = staticmethod(pickle.load)
+    loads = staticmethod(pickle.loads)
+    dump = staticmethod(pickle.dump)
+    dumps = staticmethod(pickle.dumps)
+
+
+def _torch_load(
+    path: Path,
+    device: torch.device,
+    *,
+    pickle_module: Any | None = None,
+) -> Any:
+    kwargs: dict[str, Any] = {"map_location": device}
+    if pickle_module is not None:
+        kwargs["pickle_module"] = pickle_module
+    try:
+        return torch.load(path, weights_only=False, **kwargs)
+    except TypeError:
+        return torch.load(path, **kwargs)
+
+
 def load_checkpoint(path: Path, device: torch.device) -> dict[str, Any]:
     if sys.platform == "win32":
         pathlib.PosixPath = pathlib.WindowsPath
     try:
-        checkpoint = torch.load(path, map_location=device, weights_only=False)
-    except TypeError:
-        checkpoint = torch.load(path, map_location=device)
+        checkpoint = _torch_load(path, device)
+    except ModuleNotFoundError as error:
+        if error.name != "pathlib._local":
+            raise
+        checkpoint = _torch_load(
+            path,
+            device,
+            pickle_module=_PathlibCompatPickleModule,
+        )
     if not isinstance(checkpoint, dict):
         raise TypeError("Checkpoint must contain a dictionary")
     return checkpoint
@@ -749,7 +787,7 @@ def evaluate(args: argparse.Namespace) -> dict[str, Any]:
             "matching": "one_to_one_hungarian_normalized_center_distance",
             "normalization": "gt_vertebra_bounding_box_diagonal",
             "primary_detection_gate": "0.20D",
-            "detection_sensitivity_gates": ["0.10D", "0.25D"],
+            "detection_sensitivity_gates": ["0.10D", "0.15D", "0.25D"],
             "pck_thresholds": [0.05, 0.10, 0.20],
             "usable_vertebra": (
                 "accepted center match, finite non-self-intersecting in-image "
@@ -868,8 +906,9 @@ def main() -> None:
     )
     print()
     print(
-        "spine_chain | f1@0.20D={:.4f} | usable_recall={:.4f} | "
+        "spine_chain | f1@0.15D={:.4f} | f1@0.20D={:.4f} | usable_recall={:.4f} | "
         "count_mae={:.3f} | cobb_mae={} | cobb@5={:.4f}".format(
+            float(chain["center_f1_0.15d"]),
             float(chain["center_f1_0.20d"]),
             float(chain["usable_vertebra_recall"]),
             float(chain["count_mae"]),

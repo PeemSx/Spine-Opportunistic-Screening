@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import unittest
 from pathlib import Path
+from tempfile import TemporaryDirectory
+from unittest.mock import patch
 
 import torch
 
@@ -14,6 +16,7 @@ from src.export_centernet_deployment import (
     DEPLOYED_FORMAT_VERSION,
     DEPLOYED_POSTPROCESSING_CONTRACT,
     build_deployment_artifact,
+    export_checkpoint,
 )
 
 
@@ -67,6 +70,30 @@ class ExportCenterNetDeploymentTests(unittest.TestCase):
                 source_checkpoint_path=Path("best_center_f1.pt"),
                 source_checkpoint_sha256="deadbeef",
             )
+
+    def test_export_round_trip_strips_training_state_and_loads_strictly(self) -> None:
+        class WeightOnly(torch.nn.Module):
+            def __init__(self) -> None:
+                super().__init__()
+                self.weight = torch.nn.Parameter(torch.zeros(2))
+
+        with TemporaryDirectory() as directory:
+            root = Path(directory)
+            source_path = root / "full.pt"
+            output_path = root / "compact.pt"
+            torch.save(source_checkpoint(), source_path)
+            with patch(
+                "src.export_centernet_deployment.build_centernet_model",
+                return_value=WeightOnly(),
+            ):
+                export_checkpoint(source_path, output_path, force=False)
+
+            compact = torch.load(output_path, map_location="cpu", weights_only=False)
+
+        self.assertEqual(compact["model_state_dict"]["weight"].tolist(), [1.0, 2.0])
+        self.assertNotIn("optimizer_state_dict", compact)
+        self.assertNotIn("scheduler_state_dict", compact)
+        self.assertNotIn("scaler_state_dict", compact)
 
 
 if __name__ == "__main__":

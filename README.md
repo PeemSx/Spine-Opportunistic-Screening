@@ -47,6 +47,22 @@ dataset/processed/coco_nih adds NIH ChestX-ray14 annotations: 1,550 train, 194 v
 
 dataset/processed/coco_nih_lumos extends that checkpoint with the reviewed August 10, 2026 Roboflow export: 1,788 train, 223 validation, and 223 test radiographs. It contains 257/32/32 NIH images and 128/16/16 Lumos AP images. Existing assignments are preserved, additional NIH studies are grouped with their patient, and the output uses one canonical `vertebra` category with TL, TR, BL, BR keypoints.
 
+Create independent, unsplit COCO datasets grouped by source from the current
+processed train, validation, and test splits with:
+
+~~~powershell
+python -m src.data.build_raw_by_source `
+  --processed-root dataset/processed `
+  --output-root dataset/raw
+~~~
+
+Each `dataset/raw/<source>` directory is a standalone COCO root containing
+`images/` and `_annotations.keypoints.coco.json`; `source_summary.json` records
+the combined and former-split counts. Because some processed IDs are reused
+between splits, the merged files use dense per-source COCO IDs and retain the
+original split and IDs in `processed_split`, `processed_image_id`, and
+`processed_annotation_id`.
+
 Rebuild the combined dataset with:
 
 ~~~powershell
@@ -71,6 +87,26 @@ The Colab training notebook for this dataset is:
     notebooks/colab/train_centernet_hrnet_w18_nih_lumos.ipynb
 
 It uses the distinct experiment `centernet_hrnet_w18_coco_nih_lumos`. Checkpoints include a dataset fingerprint and cannot be resumed against different annotations without an explicit unsafe override.
+
+### Pretrained HRNet-W18 existing-loss baseline
+
+The controlled pretrained-baseline notebook is:
+
+    notebooks/colab/train_centernet_hrnet_w18_pretrained_existing_loss.ipynb
+
+It runs the dedicated workflow `src.workflows.train_pretrained_w18_existing_loss`
+with the explicit ImageNet initialization `hrnet_w18.ms_aug_in1k`. The dataset,
+`[-0.5, 0.5]` preprocessing, augmentation, architecture, batch size 8, seed,
+optimizer, 80-epoch schedule, validation settings, and existing CenterNet loss
+weights (`hm=1.0`, `reg=1.0`, `corner=0.5`) match the scratch baseline. This
+isolates pretrained initialization; scale-normalized corner loss is not part of
+this experiment.
+
+The experiment name is
+`centernet_hrnet_w18_imagenet_pretrained_existing_loss_coco_nih_lumos_seed20260627`.
+The workflow requires dataset fingerprint
+`d99fbd046ece0cd2d10598fa1fb1da0eed24cb8542270f54a732616c8cb9e8f3`
+and rejects incompatible or scratch-initialized resume checkpoints.
 
 ### Landmark validation during training
 

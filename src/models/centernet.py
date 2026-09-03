@@ -21,6 +21,19 @@ HRNET_BACKBONES = (
 )
 SUPPORTED_BACKBONES = (*HRNET_BACKBONES, "resnet34")
 
+# Use explicit timm weight identifiers so a pretrained experiment does not
+# silently change when timm changes the default pretrained tag for an
+# architecture alias such as ``hrnet_w18``.
+HRNET_PRETRAINED_BACKBONE_IDS = {
+    "hrnet_w18": "hrnet_w18.ms_aug_in1k",
+    "hrnet_w30": "hrnet_w30.ms_in1k",
+    "hrnet_w32": "hrnet_w32.ms_in1k",
+    "hrnet_w40": "hrnet_w40.ms_in1k",
+    "hrnet_w44": "hrnet_w44.ms_in1k",
+    "hrnet_w48": "hrnet_w48.ms_in1k",
+    "hrnet_w64": "hrnet_w64.ms_in1k",
+}
+
 
 def _conv_bn_relu(in_channels: int, out_channels: int, kernel_size: int = 3) -> nn.Sequential:
     padding = kernel_size // 2
@@ -59,6 +72,7 @@ class CenterNetResNetFPN(nn.Module):
         head_channels: int = 128,
     ) -> None:
         super().__init__()
+        self.pretrained = bool(pretrained)
         weights = ResNet34_Weights.DEFAULT if pretrained else None
         backbone = resnet34(weights=weights)
 
@@ -126,8 +140,15 @@ class CenterNetHRNet(nn.Module):
                 "Install project requirements or run: pip install timm"
             )
 
+        self.backbone_name = backbone_name
+        self.pretrained = bool(pretrained)
+        self.backbone_model_id = (
+            HRNET_PRETRAINED_BACKBONE_IDS[backbone_name]
+            if pretrained
+            else backbone_name
+        )
         self.backbone = timm.create_model(
-            backbone_name,
+            self.backbone_model_id,
             pretrained=pretrained,
             features_only=True,
             out_indices=(1, 2, 3, 4),
@@ -174,3 +195,40 @@ def build_centernet_model(backbone: str = "hrnet_w18", pretrained: bool = False)
     if backbone == "resnet34":
         return CenterNetResNetFPN(pretrained=pretrained)
     raise ValueError(f"Unsupported CenterNet backbone: {backbone}")
+
+
+def model_initialization_metadata(model: nn.Module) -> dict[str, object]:
+    """Return JSON-compatible provenance for a CenterNet initialization."""
+
+    if isinstance(model, CenterNetHRNet):
+        pretrained_cfg = getattr(model.backbone, "pretrained_cfg", {}) or {}
+        pretrained_source = None
+        if model.pretrained:
+            pretrained_source = (
+                pretrained_cfg.get("hf_hub_id")
+                or pretrained_cfg.get("url")
+                or None
+            )
+        return {
+            "backbone": model.backbone_name,
+            "pretrained": model.pretrained,
+            "pretrained_backbone_id": (
+                model.backbone_model_id if model.pretrained else None
+            ),
+            "pretrained_source": pretrained_source,
+        }
+    if isinstance(model, CenterNetResNetFPN):
+        return {
+            "backbone": "resnet34",
+            "pretrained": model.pretrained,
+            "pretrained_backbone_id": (
+                "ResNet34_Weights.DEFAULT" if model.pretrained else None
+            ),
+            "pretrained_source": "torchvision" if model.pretrained else None,
+        }
+    return {
+        "backbone": type(model).__name__,
+        "pretrained": False,
+        "pretrained_backbone_id": None,
+        "pretrained_source": None,
+    }

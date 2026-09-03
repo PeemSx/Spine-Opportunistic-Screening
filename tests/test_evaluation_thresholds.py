@@ -2,7 +2,10 @@ from __future__ import annotations
 
 import argparse
 import inspect
+import pathlib
+import sys
 import tempfile
+import types
 import unittest
 from pathlib import Path
 from unittest.mock import patch
@@ -13,6 +16,7 @@ from src.evaluate_centernet import (
     DEPLOYED_OUTPUT_CONTRACT,
     DEPLOYED_PREPROCESSING_CONTRACT,
     build_model_and_settings,
+    load_checkpoint,
 )
 from src.evaluation.centernet_decode import decode_centernet_outputs
 from src.evaluation.config import DEFAULT_PEAK_THRESHOLD
@@ -76,6 +80,32 @@ def checkpoint_payload(
 
 
 class EvaluationThresholdTests(unittest.TestCase):
+    def test_loads_checkpoint_serialized_with_newer_pathlib_module(self) -> None:
+        module = types.ModuleType("pathlib._local")
+        newer_posix_path = type(
+            "PosixPath",
+            (pathlib.PosixPath,),
+            {"__module__": "pathlib._local"},
+        )
+        module.PosixPath = newer_posix_path
+        sys.modules["pathlib._local"] = module
+        setattr(pathlib, "_local", module)
+        try:
+            with tempfile.TemporaryDirectory() as directory:
+                checkpoint_path = Path(directory) / "newer-python.pt"
+                torch.save({"saved_path": newer_posix_path("weights.pt")}, checkpoint_path)
+                del sys.modules["pathlib._local"]
+                delattr(pathlib, "_local")
+
+                checkpoint = load_checkpoint(checkpoint_path, torch.device("cpu"))
+
+            self.assertEqual(checkpoint["saved_path"], Path("weights.pt"))
+            self.assertIs(type(checkpoint["saved_path"]), pathlib.PosixPath)
+        finally:
+            sys.modules.pop("pathlib._local", None)
+            if hasattr(pathlib, "_local"):
+                delattr(pathlib, "_local")
+
     def test_shared_decoder_default_is_point_ten(self) -> None:
         self.assertEqual(DEFAULT_PEAK_THRESHOLD, 0.10)
         default = inspect.signature(decode_centernet_outputs).parameters[
