@@ -57,3 +57,5 @@ tests
 *.tmp
 *.temp
 ~$*
+
+*.zip
